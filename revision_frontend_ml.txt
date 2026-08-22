@@ -1,0 +1,3309 @@
+﻿===== C:\Proyect_PizzaMya\Pizza_Mya-Front\Pizza_Mya-Front\Pizza_Mya-Front\src\api\adminPedidos.api.js =====
+import { apiFetch } from "./cliente.js";
+
+export const adminPedidosApi = {
+  async list({ token, status, from, to } = {}) {
+    const params = new URLSearchParams();
+    if (status) params.append("status", status);
+    if (from) params.append("from", from);
+    if (to) params.append("to", to);
+    const query = params.toString() ? `?${params.toString()}` : "";
+
+    const data = await apiFetch(`/api/admin/orders${query}`, {
+      auth: false,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    return Array.isArray(data) ? data : [];
+  },
+
+  async getById({ token, id } = {}) {
+    return apiFetch(`/api/admin/orders/${id}`, {
+      auth: false,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  },
+
+  /**
+   * Cambia el estado de un pedido.
+   * Acepta tanto `estado` como `estatus` para compatibilidad
+   * con los dos hooks que lo usan.
+   */
+  async setEstado({ token, id, estado, estatus } = {}) {
+    const status = estado || estatus;
+    return apiFetch(`/api/admin/orders/${id}/status`, {
+      method: "PATCH",
+      auth: false,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: { status },
+    });
+  },
+
+  // Alias usado por useAdminPedidos en hooks/admin/
+  async updateStatus({ token, id, estatus } = {}) {
+    return this.setEstado({ token, id, estatus });
+  },
+};
+===== C:\Proyect_PizzaMya\Pizza_Mya-Front\Pizza_Mya-Front\Pizza_Mya-Front\src\api\adminPrediccionInsumos.api.js =====
+import { httpJson, buildApiUrl } from "./http.js";
+
+function authHeaders(token) {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export const adminPrediccionInsumosApi = {
+  overview: ({
+    token,
+    escala = "semana",
+    fechaInicio,
+    fechaFin,
+    vista = "semana",
+    periodos,
+  } = {}) => {
+    const params = new URLSearchParams({ escala, vista });
+
+    if (fechaInicio) params.append("fechaInicio", fechaInicio);
+    if (fechaFin) params.append("fechaFin", fechaFin);
+    if (periodos != null) params.append("periodos", String(periodos));
+
+    const url = buildApiUrl(
+      `/api/admin/prediccion-insumos/overview?${params.toString()}`,
+    );
+
+    return httpJson(url, {
+      method: "GET",
+      headers: authHeaders(token),
+    });
+  },
+};
+===== C:\Proyect_PizzaMya\Pizza_Mya-Front\Pizza_Mya-Front\Pizza_Mya-Front\src\hooks\admin\useAdminPrediccionInsumos.js =====
+// hooks/admin/useAdminPrediccionInsumos.js
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { adminPrediccionInsumosApi } from "../../api/adminPrediccionInsumos.api.js";
+
+const formatNumber = (value, digits = 2) =>
+  Number(Number(value || 0)).toLocaleString("es-MX", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+
+const formatPeriod = (value, escala = "semana") => {
+  const text = String(value ?? "").trim();
+  if (!text) return "—";
+
+  const date = new Date(text + "T00:00:00");
+  if (!Number.isNaN(date.getTime())) {
+    const options =
+      escala === "mes"
+        ? { month: "short", year: "numeric" }
+        : escala === "dia"
+          ? { day: "2-digit", month: "short" }
+          : { day: "2-digit", month: "short", year: "numeric" };
+
+    return new Intl.DateTimeFormat("es-MX", options).format(date);
+  }
+  return text;
+};
+
+const getTrendTone = (trend = "") => {
+  const value = String(trend || "").toLowerCase();
+  if (value.includes("crec")) return "accent";
+  if (value.includes("decre")) return "info";
+  if (value.includes("estab")) return "success";
+  return "primary";
+};
+
+const formatDateLocal = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+// 🔹 Función para calcular fechas iniciales según escala
+const calcularFechasIniciales = (escala, periodos) => {
+  const hoy = new Date();
+  const fin = new Date(hoy.getTime() - hoy.getTimezoneOffset() * 60000);
+  const inicio = new Date(fin);
+
+  if (escala === "dia") {
+    inicio.setDate(inicio.getDate() - 30);
+  } else if (escala === "semana") {
+    const semanas = Math.max(1, Math.min(periodos, 4));
+    inicio.setDate(inicio.getDate() - semanas * 7);
+  } else if (escala === "mes") {
+    const meses = Math.max(1, Math.min(periodos, 4));
+    inicio.setMonth(inicio.getMonth() - meses);
+  }
+
+  return {
+    fechaInicio: formatDateLocal(inicio),
+    fechaFin: formatDateLocal(fin),
+  };
+};
+
+export function useAdminPrediccionInsumos(token) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [escala, setEscala] = useState("semana");
+  const [periodos, setPeriodos] = useState(4);
+
+  // 🔹 Inicializar con fechas calculadas
+  const fechasIniciales = useMemo(
+    () => calcularFechasIniciales("semana", 4),
+    [],
+  );
+
+  const [fechaInicio, setFechaInicio] = useState(fechasIniciales.fechaInicio);
+  const [fechaFin, setFechaFin] = useState(fechasIniciales.fechaFin);
+  const [data, setData] = useState(null);
+
+  // 🔹 Calcular fechas según escala (para mostrar en el rango)
+  const fechasCalculadas = useMemo(() => {
+    // Si hay fechas manuales (escala día), usarlas directamente
+    if (escala === "dia" && fechaInicio && fechaFin) {
+      return {
+        fechaInicio: fechaInicio,
+        fechaFin: fechaFin,
+      };
+    }
+
+    // Para semana/mes, calcular automáticamente
+    return calcularFechasIniciales(escala, periodos);
+  }, [escala, periodos, fechaInicio, fechaFin]);
+
+  const load = useCallback(
+    async (silent = false) => {
+      try {
+        if (!silent) setLoading(true);
+        setError("");
+
+        const response = await adminPrediccionInsumosApi.overview({
+          token,
+          escala,
+          fechaInicio: fechasCalculadas.fechaInicio,
+          fechaFin: fechasCalculadas.fechaFin,
+          vista: escala,
+        });
+
+        setData(response);
+      } catch (err) {
+        console.error("❌ Error cargando predicción:", err);
+        setError(err?.message || "No se pudo cargar la predicción de insumos.");
+        setData(null);
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [token, escala, fechasCalculadas],
+  );
+
+  useEffect(() => {
+    if (token) {
+      load();
+    }
+  }, [token]);
+
+  // 🔹 Actualizar fechas cuando cambia la escala
+  useEffect(() => {
+    if (escala !== "dia") {
+      const nuevasFechas = calcularFechasIniciales(escala, periodos);
+      setFechaInicio(nuevasFechas.fechaInicio);
+      setFechaFin(nuevasFechas.fechaFin);
+    }
+  }, [escala, periodos]);
+
+  const lineChartData = useMemo(() => {
+    if (!data?.historico?.length) return { historico: [], proyeccion: [] };
+
+    return {
+      historico: data.historico.map((item) => ({
+        label: formatPeriod(item.periodo, escala),
+        total: item.total_pizzas,
+        tooltip: `${formatNumber(item.total_pizzas, 0)} pizzas · ${formatNumber(item.bolsas_queso)} bolsas`,
+      })),
+      proyeccion: (data.proyeccion || []).map((item) => ({
+        label: formatPeriod(item.periodo, escala),
+        total: item.total_pizzas,
+        tooltip: `${formatNumber(item.total_pizzas, 0)} pizzas · ${formatNumber(item.bolsas_queso)} bolsas · Confianza: ${item.confianza}`,
+        confianza: item.confianza,
+      })),
+    };
+  }, [data, escala]);
+
+  // 🔹 CORREGIDO: Mostrar TODOS los tamaños, incluso si son 0 (incluyendo Jumbo)
+  const sizeProjectionData = useMemo(() => {
+    if (!data?.tamanios) return [];
+    return Object.values(data.tamanios).map((item) => ({
+      label: item.nombre,
+      total: item.proyectado_siguiente,
+    }));
+    // ← SIN .filter() para mostrar Individual, Mediana, Grande y Jumbo siempre
+  }, [data]);
+
+  // 🔹 CORREGIDO: Mostrar TODOS los tamaños en queso, incluso si son 0
+  const cheeseBySizeData = useMemo(() => {
+    if (!data?.queso_por_tamanio) return [];
+    return data.queso_por_tamanio.map((item) => ({
+      label: item.label,
+      total: item.total,
+      unit: "bolsas",
+    }));
+    // ← SIN .filter() para mostrar todos los tamaños
+  }, [data]);
+
+  // 🔹 CORREGIDO: Mostrar TODOS los tamaños en la dona, incluso si son 0
+  const compositionDonutData = useMemo(() => {
+    if (!data?.composicion_siguiente_semana) return [];
+    return data.composicion_siguiente_semana.map((item) => ({
+      label: item.label,
+      total: item.total,
+    }));
+    // ← SIN .filter() para mostrar todos los tamaños
+  }, [data]);
+
+  return {
+    loading,
+    error,
+    data,
+    escala,
+    setEscala,
+    periodos,
+    setPeriodos,
+    fechaInicio,
+    setFechaInicio,
+    fechaFin,
+    setFechaFin,
+    fechasCalculadas,
+    load,
+    refresh: load,
+    lineChartData,
+    sizeProjectionData,
+    cheeseBySizeData,
+    compositionDonutData,
+    formatNumber,
+    formatPeriod,
+    getTrendTone,
+  };
+}
+===== C:\Proyect_PizzaMya\Pizza_Mya-Front\Pizza_Mya-Front\Pizza_Mya-Front\src\pages\admin\AdminPedidos.jsx =====
+import ConfirmModal from "../../components/ui/ConfirmModal.jsx";
+import Loader from "../../components/ui/Loader.jsx";
+import AdminPedidoDetalleModal from "./admin-pedidos/AdminPedidoDetalleModal.jsx";
+import AdminPedidosCalendar from "./admin-pedidos/AdminPedidosCalendar.jsx";
+import AdminPedidosTable from "./admin-pedidos/AdminPedidosTable.jsx";
+import AdminPedidosToolbar from "./admin-pedidos/AdminPedidosToolbar.jsx";
+import { useAdminPedidos } from "./admin-pedidos/useAdminPedidos.js";
+import AdminMetricCard from "../../components/admin/ui/AdminMetricCard.jsx";
+import AdminPageHeader from "../../components/admin/ui/AdminPageHeader.jsx";
+import AdminPanel from "../../components/admin/ui/AdminPanel.jsx";
+import {
+  DonutChart,
+  VerticalBarChart,
+} from "../../components/admin/charts/AdminCharts.jsx";
+import { adminTheme } from "../../components/admin/ui/adminTheme.js";
+
+function buildDailySeries(rows = []) {
+  const map = new Map();
+
+  rows.forEach((item) => {
+    const value = item?.created_at || item?.created || item?.fecha;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return;
+
+    const key = date.toISOString().slice(0, 10);
+    const current = map.get(key) || {
+      label: date.toLocaleDateString("es-MX", {
+        day: "2-digit",
+        month: "short",
+      }),
+      total: 0,
+    };
+    current.total += 1;
+    map.set(key, current);
+  });
+
+  return Array.from(map.values()).slice(-7);
+}
+
+export default function AdminPedidos() {
+  const pedidos = useAdminPedidos();
+
+  const cards = [
+    {
+      title: "Pedidos visibles",
+      value: pedidos.filtered.length,
+      helper: "Resultados bajo el filtro actual",
+      icon: "≡",
+      tone: "primary",
+    },
+    {
+      title: "Pendientes",
+      value: pedidos.stats.pendientes,
+      helper: "Requieren atención inicial",
+      icon: "!",
+      tone: "accent",
+    },
+    {
+      title: "Preparando",
+      value: pedidos.stats.preparando,
+      helper: "Actualmente en cocina",
+      icon: "↺",
+      tone: "info",
+    },
+    {
+      title: "En entrega",
+      value: pedidos.stats.enEntrega,
+      helper: "Pedidos ya en ruta",
+      icon: "→",
+      tone: "success",
+    },
+  ];
+
+  const statusChart = [
+    { label: "Pendiente", total: pedidos.stats.pendientes },
+    { label: "Preparando", total: pedidos.stats.preparando },
+    { label: "En entrega", total: pedidos.stats.enEntrega },
+    { label: "Completado", total: pedidos.stats.completados },
+    { label: "Cancelado", total: pedidos.stats.cancelados },
+  ].filter((item) => item.total > 0);
+
+  const dailySeries = buildDailySeries(pedidos.filtered);
+
+  return (
+    <>
+      <style>{`
+  .admin-pedidos-shell { display: grid; gap: 18px; }
+  .admin-pedidos-kpis {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .admin-pedidos-top {
+    display: grid;
+    grid-template-columns: .9fr 1.1fr;
+    gap: 18px;
+    align-items: start;
+  }
+  .admin-pedidos-main {
+    display: grid;
+    grid-template-columns: 340px minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  .admin-pedidos-table-scroll{
+    min-width: 0;
+    max-height: 650px;
+    overflow: auto;
+    border-radius: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: #fff;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+  }
+
+  .admin-pedidos-table-scroll::-webkit-scrollbar{
+    width: 10px;
+    height: 10px;
+  }
+
+  .admin-pedidos-table-scroll::-webkit-scrollbar-thumb{
+    background: rgba(148, 163, 184, 0.7);
+    border-radius: 999px;
+  }
+
+  .admin-pedidos-table-scroll::-webkit-scrollbar-track{
+    background: transparent;
+  }
+
+  @media (max-width: 1120px) {
+    .admin-pedidos-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .admin-pedidos-top,
+    .admin-pedidos-main {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 680px){
+    .admin-pedidos-kpis { grid-template-columns: 1fr; }
+    .admin-pedidos-table-scroll{
+      max-height: 520px;
+    }
+  }
+`}</style>
+
+      <div className="admin-pedidos-shell">
+        <AdminPageHeader
+          eyebrow="Operación"
+          title="Gestión de pedidos"
+          subtitle="Quité el look cargado y dejé un resumen más útil para admin: flujo de estados, comportamiento reciente y la tabla operativa debajo."
+        />
+
+        <section className="admin-pedidos-kpis">
+          {cards.map((card) => (
+            <AdminMetricCard key={card.title} {...card} />
+          ))}
+        </section>
+
+        <section className="admin-pedidos-main">
+          <aside>
+            <AdminPedidosCalendar
+              calendarMonth={pedidos.calendarMonth}
+              setCalendarMonth={pedidos.setCalendarMonth}
+              monthTitle={pedidos.monthTitle}
+              calendarDays={pedidos.calendarDays}
+              today={pedidos.today}
+              selectedDate={pedidos.selectedDate}
+              setSelectedDate={pedidos.setSelectedDate}
+              pedidosEnFechaSeleccionada={pedidos.pedidosEnFechaSeleccionada}
+            />
+          </aside>
+
+          <section style={{ display: "grid", gap: 16, minWidth: 0 }}>
+            <AdminPedidosToolbar
+              q={pedidos.q}
+              setQ={pedidos.setQ}
+              tab={pedidos.tab}
+              setTab={pedidos.setTab}
+              orden={pedidos.orden}
+              setOrden={pedidos.setOrden}
+              pageSize={pedidos.pageSize}
+              setPageSize={pedidos.setPageSize}
+              tabs={pedidos.tabs}
+              onRefresh={pedidos.load}
+              onExport={pedidos.exportPedidos}
+              loading={pedidos.loading && pedidos.items.length > 0}
+            />
+
+            {pedidos.error ? (
+              <div
+                style={{
+                  padding: 14,
+                  borderRadius: 16,
+                  background: "rgba(163, 60, 43, 0.12)",
+                  color: adminTheme.colors.danger,
+                  fontWeight: 700,
+                }}
+              >
+                {pedidos.error}
+              </div>
+            ) : null}
+
+            {pedidos.success ? (
+              <div
+                style={{
+                  padding: 14,
+                  borderRadius: 16,
+                  background: "rgba(45, 108, 82, 0.12)",
+                  color: adminTheme.colors.success,
+                  fontWeight: 700,
+                }}
+              >
+                {pedidos.success}
+              </div>
+            ) : null}
+
+            {pedidos.loading && pedidos.items.length === 0 ? (
+              <Loader text="Cargando pedidos..." />
+            ) : (
+              <div className="admin-pedidos-table-scroll">
+                <AdminPedidosTable
+                  items={pedidos.paginated}
+                  page={pedidos.page}
+                  totalPages={pedidos.totalPages}
+                  setPage={pedidos.setPage}
+                  start={pedidos.start}
+                  end={pedidos.end}
+                  total={pedidos.filtered.length}
+                  onOpen={pedidos.openDetalle}
+                  onEnviar={pedidos.confirmEnviar}
+                  updatingId={pedidos.updatingId}
+                />
+              </div>
+            )}
+          </section>
+        </section>
+        <section className="admin-pedidos-top">
+          <AdminPanel
+            title="Estado de los pedidos"
+            subtitle="Reparto actual de la operación por estatus."
+          >
+            <DonutChart
+              data={statusChart}
+              valueKeys={["total"]}
+              labelKeys={["label"]}
+              centerLabel="Filtrados"
+              centerValue={pedidos.filtered.length}
+              valueFormatter={(value) => `${value}`}
+            />
+          </AdminPanel>
+
+          <AdminPanel
+            title="Flujo de pedidos recientes"
+            subtitle="Conteo de pedidos en los últimos días del conjunto filtrado."
+          >
+            <VerticalBarChart
+              data={dailySeries}
+              valueKeys={["total"]}
+              labelKeys={["label"]}
+              valueFormatter={(value) => `${value}`}
+              color={adminTheme.colors.primary}
+            />
+          </AdminPanel>
+        </section>
+
+        <AdminPedidoDetalleModal
+          open={pedidos.showDetalle}
+          pedido={pedidos.selectedPedido}
+          onClose={pedidos.closeDetalle}
+        />
+
+        <ConfirmModal
+          open={Boolean(pedidos.confirmPedido)}
+          onClose={pedidos.cancelConfirm}
+          onConfirm={pedidos.marcarEnEntrega}
+          title="Confirmar cambio de estado"
+          message={`¿Deseas marcar el pedido ${pedidos.confirmPedido?.folio || ""} como EN ENTREGA?`}
+          confirmText="Sí, enviar"
+          confirmVariant="primary"
+          loading={Boolean(pedidos.updatingId)}
+          loadingText="Actualizando..."
+        />
+      </div>
+    </>
+  );
+}
+===== C:\Proyect_PizzaMya\Pizza_Mya-Front\Pizza_Mya-Front\Pizza_Mya-Front\src\pages\admin\AdminPrediccionInsumos.jsx =====
+// components/admin/predictions/AdminPrediccionInsumos.jsx
+import { useMemo } from "react";
+import { useAuth } from "../../context/AuthContext.jsx";
+import { useAdminPrediccionInsumos } from "../../hooks/admin/useAdminPrediccionInsumos.js";
+import AdminButton from "../../components/admin/ui/AdminButton.jsx";
+import AdminMetricCard from "../../components/admin/ui/AdminMetricCard.jsx";
+import AdminPanel from "../../components/admin/ui/AdminPanel.jsx";
+import {
+  DonutChart,
+  LineAreaChart,
+  VerticalBarChart,
+} from "../../components/admin/charts/AdminCharts.jsx";
+import {
+  adminTheme,
+  selectStyle,
+  subtleBadgeStyle,
+  softPanelStyle,
+  inputStyle,
+} from "../../components/admin/ui/adminTheme.js";
+
+const ESCALAS_DISPONIBLES = [
+  { value: "dia", label: "Por día" },
+  { value: "semana", label: "Por semana" },
+  { value: "mes", label: "Por mes" },
+];
+
+const PROYECCIONES_POR_ESCALA = {
+  dia: "7 días",
+  semana: "4 semanas",
+  mes: "3 meses",
+};
+
+const LABELS_POR_ESCALA = {
+  dia: { singular: "día", plural: "días" },
+  semana: { singular: "semana", plural: "semanas" },
+  mes: { singular: "mes", plural: "meses" },
+};
+
+export default function AdminPrediccionInsumos() {
+  const { token } = useAuth();
+  const {
+    loading,
+    error,
+    data,
+    escala,
+    setEscala,
+    periodos,
+    setPeriodos,
+    fechaInicio,
+    setFechaInicio,
+    fechaFin,
+    setFechaFin,
+    fechasCalculadas,
+    load,
+    lineChartData,
+    sizeProjectionData,
+    cheeseBySizeData,
+    compositionDonutData,
+    formatNumber,
+    formatPeriod,
+    getTrendTone,
+  } = useAdminPrediccionInsumos(token);
+
+  const kpis = data?.kpis || {};
+  const historico = data?.historico || [];
+  const proyeccion = data?.proyeccion || [];
+  const resumen = data?.resumen || {};
+
+  const summaryCards = useMemo(
+    () => [
+      {
+        title: "Pizzas proyectadas",
+        value: `${formatNumber(kpis?.total_pizzas_proyectadas, 0)} pizzas`,
+        helper: `${escala === "dia" ? "Día" : escala === "semana" ? "Semana" : "Mes"} ${kpis?.periodo_objetivo || "—"} · Objetivo`,
+        icon: "🍕",
+        tone: "primary",
+      },
+      {
+        title: "Bolsas de queso",
+        value: `${formatNumber(kpis?.bolsas_queso_requeridas)} bolsas`,
+        icon: "🧀",
+        tone: "accent",
+      },
+      {
+        title: "Queso requerido",
+        value: `${formatNumber(kpis?.kilogramos_queso_requeridos)} kg`,
+        helper: "Resultado para planeación de compras",
+        icon: "⚖️",
+        tone: "success",
+      },
+      {
+        title: "Tendencia general",
+        value: String(kpis?.tendencia_general || "estable").toUpperCase(),
+        helper: `Stock: ${formatNumber(kpis?.stock_actual_bolsas, 0)} · Reorden: ${formatNumber(kpis?.punto_reorden_bolsas, 0)}`,
+        icon: kpis?.tendencia_general?.includes("crec")
+          ? "📈"
+          : kpis?.tendencia_general?.includes("decre")
+            ? "📉"
+            : "➡️",
+        tone: getTrendTone(kpis?.tendencia_general),
+      },
+    ],
+    [kpis, escala, formatNumber, getTrendTone],
+  );
+
+  const tablaPeriodos = useMemo(
+    () => [
+      ...historico.map((item) => ({ ...item, __tipo: "Histórico" })),
+      ...proyeccion.map((item) => ({ ...item, __tipo: "Proyección" })),
+    ],
+    [historico, proyeccion],
+  );
+
+  const donutCenterValue = useMemo(() => {
+    if (escala === "dia") {
+      return formatPeriod(String(kpis?.periodo_objetivo || ""), "dia");
+    }
+    return formatNumber(kpis?.periodo_objetivo, 0);
+  }, [escala, kpis?.periodo_objetivo, formatNumber, formatPeriod]);
+
+  const escalaTexto = {
+    dia: "diario",
+    semana: "semanal",
+    mes: "mensual",
+  };
+
+  const escalaLabel = LABELS_POR_ESCALA[escala] || LABELS_POR_ESCALA.semana;
+
+  return (
+    <div
+      className="admin-prediccion-page"
+      style={{
+        display: "grid",
+        gap: 22,
+        width: "100%",
+        maxWidth: 1400,
+        minWidth: 0,
+        margin: "0 auto",
+        overflowX: "hidden",
+      }}
+    >
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+
+        .admin-prediccion-page,
+        .admin-prediccion-page * {
+          box-sizing: border-box;
+        }
+
+        .admin-prediccion-page {
+          min-width: 0;
+          max-width: 100%;
+        }
+
+        .pred-header,
+        .pred-range-panel,
+        .pred-panel,
+        .pred-panel > section,
+        .pred-card-wrap,
+        .pred-chart-wrap,
+        .pred-table-wrap,
+        .pred-info-card {
+          min-width: 0;
+          max-width: 100%;
+        }
+
+        .pred-header {
+          padding: 24px 24px 22px;
+          background: linear-gradient(135deg, rgba(255,250,245,1) 0%, rgba(247,241,235,1) 100%);
+          border: 1px solid ${adminTheme.border};
+          border-radius: ${adminTheme.radiusLg};
+          box-shadow: ${adminTheme.shadow};
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: start;
+          gap: 18px;
+          overflow: hidden;
+        }
+
+        .pred-header-main {
+          min-width: 0;
+          max-width: 100%;
+        }
+
+        .pred-eyebrow {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 12px;
+          border-radius: 999px;
+          background: ${adminTheme.accentSoft};
+          color: ${adminTheme.accent};
+          font-weight: 800;
+          font-size: 12px;
+          letter-spacing: .04em;
+          text-transform: uppercase;
+          max-width: 100%;
+          white-space: normal;
+        }
+
+        .pred-eyebrow-dot {
+          width: 8px;
+          height: 8px;
+          flex: 0 0 8px;
+          border-radius: 50%;
+          background: ${adminTheme.accent};
+        }
+
+        .pred-title {
+          margin: 14px 0 0;
+          font-size: clamp(24px, 4.8vw, 34px);
+          line-height: 1.08;
+          font-weight: 950;
+          color: ${adminTheme.text};
+          letter-spacing: -0.02em;
+          max-width: 100%;
+          overflow-wrap: anywhere;
+          word-break: normal;
+        }
+
+        .pred-subtitle {
+          margin: 10px 0 0;
+          color: ${adminTheme.muted};
+          font-weight: 600;
+          font-size: 14px;
+          line-height: 1.65;
+          max-width: 760px;
+          overflow-wrap: anywhere;
+        }
+
+        .pred-actions {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          flex-wrap: wrap;
+          gap: 12px;
+          width: 100%;
+          min-width: 0;
+        }
+
+        .pred-field,
+        .pred-control {
+          min-width: 0;
+          max-width: 100%;
+        }
+
+        .pred-grid-two,
+        .pred-grid-two-even,
+        .pred-kpi-grid,
+        .pred-info-grid {
+          min-width: 0;
+          max-width: 100%;
+        }
+
+        .pred-panel > section {
+          overflow: hidden;
+        }
+
+        .pred-chart-wrap {
+          width: 100%;
+          overflow: hidden;
+        }
+
+        .pred-table-wrap {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        .pred-mobile-periods {
+          display: none;
+        }
+
+        .pred-range-content span,
+        .pred-info-card,
+        .pred-info-card * {
+          overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 1180px) {
+          .pred-grid-two,
+          .pred-grid-two-even {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+        @media (max-width: 760px) {
+          .admin-prediccion-page {
+            gap: 16px !important;
+            overflow-x: hidden;
+          }
+
+          .pred-header {
+            grid-template-columns: 1fr;
+            padding: 18px 16px !important;
+            border-radius: 18px !important;
+          }
+
+          .pred-title {
+            font-size: 24px;
+            line-height: 1.15;
+          }
+
+          .pred-actions {
+            display: grid !important;
+            grid-template-columns: 1fr;
+            justify-content: stretch;
+            align-items: stretch;
+            width: 100%;
+          }
+
+          .pred-field,
+          .pred-actions select,
+          .pred-actions input,
+          .pred-actions button {
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+
+          .pred-kpi-grid,
+          .pred-info-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .pred-card-wrap > div {
+            width: 100%;
+            min-width: 0;
+          }
+
+          .pred-range-panel {
+            padding: 12px !important;
+          }
+
+          .pred-range-content {
+            display: grid !important;
+            grid-template-columns: 1fr;
+            align-items: start !important;
+            gap: 6px !important;
+            font-size: 12px !important;
+          }
+
+          .pred-panel > section {
+            padding: 16px !important;
+            border-radius: 18px !important;
+          }
+
+          .pred-chart-wrap {
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 2px;
+          }
+
+          .pred-chart-inner {
+            min-width: 430px;
+            width: 430px;
+          }
+
+          .pred-chart-inner.pred-donut-inner {
+            min-width: 300px;
+            width: 100%;
+          }
+
+          .pred-desktop-table {
+            display: none !important;
+          }
+
+          .pred-mobile-periods {
+            display: grid;
+            gap: 12px;
+          }
+
+          .pred-mobile-period-card {
+            border: 1px solid ${adminTheme.colors.border};
+            border-radius: 16px;
+            padding: 14px;
+            background: #fff;
+            display: grid;
+            gap: 12px;
+          }
+
+          .pred-mobile-period-card.proyeccion {
+            background: rgba(245, 158, 11, 0.05);
+          }
+
+          .pred-mobile-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+          }
+
+          .pred-loader-box {
+            width: 100% !important;
+            padding: 26px 18px !important;
+          }
+        }
+
+        @media (max-width: 430px) {
+          .admin-prediccion-page {
+            gap: 14px !important;
+          }
+
+          .pred-header {
+            padding: 16px 14px !important;
+          }
+
+          .pred-title {
+            font-size: 22px;
+          }
+
+          .pred-chart-inner {
+            min-width: 390px;
+            width: 390px;
+          }
+
+          .pred-mobile-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+      `}</style>
+
+      <PrediccionHeader
+        escala={escala}
+        setEscala={setEscala}
+        periodos={periodos}
+        setPeriodos={setPeriodos}
+        fechaInicio={fechaInicio}
+        setFechaInicio={setFechaInicio}
+        fechaFin={fechaFin}
+        setFechaFin={setFechaFin}
+        load={load}
+      />
+
+      <div
+        className="pred-range-panel"
+        style={softPanelStyle({ padding: 14, background: "#eff6ff" })}
+      >
+        <div
+          className="pred-range-content"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            fontSize: 13,
+            color: adminTheme.colors.text,
+            flexWrap: "wrap",
+            minWidth: 0,
+          }}
+        >
+          <span style={{ fontWeight: 700 }}>📅 Rango seleccionado:</span>
+          <span>{formatPeriod(fechasCalculadas.fechaInicio, escala)}</span>
+          <span>→</span>
+          <span>{formatPeriod(fechasCalculadas.fechaFin, escala)}</span>
+          <span style={{ color: adminTheme.colors.textSoft }}>
+            ({historico.length} {escalaLabel.plural} analizados)
+          </span>
+        </div>
+      </div>
+
+      {error ? (
+        <div style={subtleBadgeStyle("accent", { textAlign: "center" })}>
+          {error}
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            minHeight: "360px",
+            gridColumn: "1 / -1",
+            padding: "32px 16px",
+            minWidth: 0,
+          }}
+        >
+          <div
+            className="pred-loader-box"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "16px",
+              padding: "32px 48px",
+              background: "#fff",
+              borderRadius: "16px",
+              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
+              border: `1px solid ${adminTheme.colors.border}`,
+              maxWidth: "100%",
+            }}
+          >
+            <div
+              style={{
+                width: "48px",
+                height: "48px",
+                border: "4px solid #f3f3f3",
+                borderTop: "4px solid #8b2323",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+              }}
+            />
+            <p
+              style={{
+                margin: 0,
+                color: adminTheme.colors.textSoft,
+                fontSize: "14px",
+                fontWeight: 600,
+              }}
+            >
+              Calculando predicción...
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && data ? (
+        <>
+          <div
+            className="pred-kpi-grid"
+            style={{
+              display: "grid",
+              gap: 16,
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+              minWidth: 0,
+            }}
+          >
+            {summaryCards.map((card) => (
+              <div className="pred-card-wrap" key={card.title}>
+                <AdminMetricCard
+                  title={card.title}
+                  value={card.value}
+                  helper={card.helper}
+                  icon={card.icon}
+                  tone={card.tone}
+                />
+              </div>
+            ))}
+          </div>
+
+          <div
+            className="pred-grid-two"
+            style={{
+              display: "grid",
+              gap: 20,
+              gridTemplateColumns: "var(--adm-grid-two)",
+              minWidth: 0,
+            }}
+          >
+            <PanelWrap>
+              <AdminPanel
+                title="📊 Producción histórica"
+                subtitle={`Comportamiento ${escalaTexto[escala]} observado`}
+                style={{ minWidth: 0, overflow: "hidden" }}
+              >
+                <ChartScroll>
+                  <LineAreaChart
+                    data={(lineChartData?.historico || []).map((item) => ({
+                      label: item.label,
+                      total: item.total,
+                      tooltip: item.tooltip,
+                    }))}
+                    valueFormatter={(value) =>
+                      `${formatNumber(value, 0)} pizzas`
+                    }
+                    color={adminTheme.colors.primary}
+                    height={260}
+                  />
+                </ChartScroll>
+              </AdminPanel>
+            </PanelWrap>
+
+            <PanelWrap>
+              <AdminPanel
+                title="🔮 Proyección futura"
+                subtitle={`Estimación para los próximos ${PROYECCIONES_POR_ESCALA[escala]}`}
+                style={{ minWidth: 0, overflow: "hidden" }}
+              >
+                <ChartScroll>
+                  <LineAreaChart
+                    data={(lineChartData?.proyeccion || []).map((item) => ({
+                      label: item.label,
+                      total: item.total,
+                      tooltip: item.tooltip,
+                    }))}
+                    color={adminTheme.colors.accent}
+                    fill="rgba(245, 158, 11, 0.12)"
+                    valueFormatter={(value) =>
+                      `${formatNumber(value, 0)} pizzas`
+                    }
+                    height={260}
+                  />
+                </ChartScroll>
+              </AdminPanel>
+            </PanelWrap>
+          </div>
+
+          <div
+            className="pred-grid-two-even"
+            style={{
+              display: "grid",
+              gap: 20,
+              gridTemplateColumns: "var(--adm-grid-two-even)",
+              minWidth: 0,
+            }}
+          >
+            <PanelWrap>
+              <AdminPanel
+                title="🍕 Producción proyectada por tamaño"
+                subtitle={`Estimado para el siguiente ${escalaLabel.singular}`}
+                style={{ minWidth: 0, overflow: "hidden" }}
+              >
+                <ChartScroll>
+                  <VerticalBarChart
+                    data={sizeProjectionData}
+                    valueFormatter={(value) =>
+                      `${formatNumber(value, 0)} pizzas`
+                    }
+                    height={250}
+                  />
+                </ChartScroll>
+              </AdminPanel>
+            </PanelWrap>
+
+            <PanelWrap>
+              <AdminPanel
+                title="🧀 Queso requerido por tamaño"
+                subtitle="Aporte de cada tamaño al total de bolsas"
+                style={{ minWidth: 0, overflow: "hidden" }}
+              >
+                <ChartScroll>
+                  <VerticalBarChart
+                    data={cheeseBySizeData}
+                    color={adminTheme.colors.success}
+                    valueFormatter={(value) =>
+                      `${formatNumber(value, 3)} bolsas`
+                    }
+                    height={250}
+                  />
+                </ChartScroll>
+              </AdminPanel>
+            </PanelWrap>
+          </div>
+
+          <PanelWrap>
+            <AdminPanel
+              title={`🥧 Composición del siguiente ${escalaLabel.singular}`}
+              subtitle="Distribución porcentual por tamaño"
+              style={{ minWidth: 0, overflow: "hidden" }}
+            >
+              <div className="pred-chart-wrap">
+                <div className="pred-chart-inner pred-donut-inner">
+                  <DonutChart
+                    data={compositionDonutData}
+                    centerLabel={
+                      escalaLabel.singular.charAt(0).toUpperCase() +
+                      escalaLabel.singular.slice(1)
+                    }
+                    centerValue={donutCenterValue}
+                    valueFormatter={(value) =>
+                      `${formatNumber(value, 0)} pizzas`
+                    }
+                    height={280}
+                  />
+                </div>
+              </div>
+            </AdminPanel>
+          </PanelWrap>
+
+          <PanelWrap>
+            <AdminPanel
+              title={`📋 Detalle ${escalaTexto[escala]}: producción y queso`}
+              subtitle="Concentrado con cálculos derivados"
+              style={{ minWidth: 0, overflow: "hidden" }}
+            >
+              <DetallePeriodos
+                rows={tablaPeriodos}
+                escala={escala}
+                formatNumber={formatNumber}
+                formatPeriod={formatPeriod}
+              />
+            </AdminPanel>
+          </PanelWrap>
+
+          <PanelWrap>
+            <AdminPanel
+              title="💡 Interpretación operativa"
+              subtitle="Resumen para compras y control"
+              style={{ minWidth: 0, overflow: "hidden" }}
+            >
+              <div
+                className="pred-info-grid"
+                style={{
+                  display: "grid",
+                  gap: 16,
+                  gridTemplateColumns:
+                    "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
+                  minWidth: 0,
+                }}
+              >
+                <InfoCard
+                  title="📅 Parámetros del análisis"
+                  items={[
+                    {
+                      label: "Escala",
+                      value:
+                        escalaLabel.singular.charAt(0).toUpperCase() +
+                        escalaLabel.singular.slice(1),
+                    },
+                    {
+                      label: "Rango analizado",
+                      value: `${formatPeriod(fechasCalculadas.fechaInicio, escala)} - ${formatPeriod(fechasCalculadas.fechaFin, escala)}`,
+                    },
+                    {
+                      label: "Períodos analizados",
+                      value: `${resumen?.periodos_analizados || 0} ${escalaLabel.plural}`,
+                    },
+                    {
+                      label: "Proyección",
+                      value: PROYECCIONES_POR_ESCALA[escala],
+                    },
+                  ]}
+                />
+                <InfoCard
+                  title="🛒 Recomendación de compra"
+                  items={[
+                    {
+                      label: "Estado",
+                      value: kpis?.alerta_stock_bajo
+                        ? "⚠️ Stock bajo - Reordenar"
+                        : "✓ Inventario suficiente",
+                      highlight: true,
+                    },
+                    {
+                      label: "Stock actual",
+                      value: `${formatNumber(kpis?.stock_actual_bolsas, 0)} bolsas`,
+                    },
+                    {
+                      label: "Punto de reorden",
+                      value: `${formatNumber(kpis?.punto_reorden_bolsas, 0)} bolsas`,
+                    },
+                  ]}
+                  action={resumen?.recomendacion_compra}
+                />
+                <InfoCard
+                  title="📊 Lectura del resultado"
+                  items={[
+                    {
+                      label: "Producción estimada",
+                      value: `${formatNumber(kpis?.total_pizzas_proyectadas, 0)} pizzas`,
+                    },
+                    {
+                      label: "Queso requerido",
+                      value: `${formatNumber(kpis?.bolsas_queso_requeridas, 3)} bolsas · ${formatNumber(kpis?.kilogramos_queso_requeridos)} kg`,
+                    },
+                    {
+                      label: "Tendencia",
+                      value: kpis?.tendencia_general?.toUpperCase(),
+                      tone: getTrendTone(kpis?.tendencia_general),
+                    },
+                  ]}
+                />
+              </div>
+            </AdminPanel>
+          </PanelWrap>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function PrediccionHeader({
+  escala,
+  setEscala,
+  periodos,
+  setPeriodos,
+  fechaInicio,
+  setFechaInicio,
+  fechaFin,
+  setFechaFin,
+  load,
+}) {
+  return (
+    <section className="pred-header">
+      <div className="pred-header-main">
+        <div className="pred-eyebrow">
+          <span className="pred-eyebrow-dot" />
+          Propuesta Matemática
+        </div>
+        <h1 className="pred-title">Predicción de producción y queso</h1>
+        <p className="pred-subtitle">Escala: {escala.toUpperCase()}</p>
+      </div>
+
+      <div className="pred-actions">
+        <select
+          value={escala}
+          onChange={(e) => setEscala(e.target.value)}
+          className="pred-control"
+          style={selectStyle(140)}
+          title="Escala de visualización"
+        >
+          {ESCALAS_DISPONIBLES.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+
+        {escala === "dia" ? (
+          <>
+            <label className="pred-field" style={{ display: "grid", gap: 4 }}>
+              <input
+                type="date"
+                value={fechaInicio}
+                onChange={(e) => setFechaInicio(e.target.value)}
+                className="pred-control"
+                style={inputStyle()}
+                title="Fecha inicio"
+              />
+            </label>
+            <label className="pred-field" style={{ display: "grid", gap: 4 }}>
+              <input
+                type="date"
+                value={fechaFin}
+                onChange={(e) => setFechaFin(e.target.value)}
+                className="pred-control"
+                style={inputStyle()}
+                title="Fecha fin"
+              />
+            </label>
+          </>
+        ) : null}
+
+        {escala === "semana" || escala === "mes" ? (
+          <label className="pred-field" style={{ display: "grid", gap: 4 }}>
+            <select
+              value={periodos}
+              onChange={(e) => setPeriodos(Number(e.target.value))}
+              className="pred-control"
+              style={selectStyle(170)}
+              title={
+                escala === "semana" ? "Número de semanas" : "Número de meses"
+              }
+            >
+              {[1, 2, 3, 4].map((n) => (
+                <option key={n} value={n}>
+                  {n}{" "}
+                  {escala === "semana"
+                    ? n === 1
+                      ? "semana"
+                      : "semanas"
+                    : n === 1
+                      ? "mes"
+                      : "meses"}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        <AdminButton
+          onClick={() => load()}
+          type="button"
+          variant="secondary"
+          className="pred-action-btn"
+        >
+          🔄 Actualizar
+        </AdminButton>
+      </div>
+    </section>
+  );
+}
+
+function PanelWrap({ children }) {
+  return <div className="pred-panel">{children}</div>;
+}
+
+function ChartScroll({ children }) {
+  return (
+    <div className="pred-chart-wrap">
+      <div className="pred-chart-inner">{children}</div>
+    </div>
+  );
+}
+
+function DetallePeriodos({ rows, escala, formatNumber, formatPeriod }) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+
+  if (!safeRows.length) {
+    return (
+      <div
+        style={{
+          padding: 18,
+          borderRadius: 16,
+          border: `1px solid ${adminTheme.colors.border}`,
+          color: adminTheme.colors.textSoft,
+          fontWeight: 700,
+          background: "#fff",
+        }}
+      >
+        No hay periodos para mostrar.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div
+        className="pred-table-wrap pred-desktop-table"
+        style={{
+          overflow: "auto",
+          borderRadius: 16,
+          border: `1px solid ${adminTheme.colors.border}`,
+        }}
+      >
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            minWidth: 1100,
+            background: "#fff",
+            fontSize: 13,
+          }}
+        >
+          <thead>
+            <tr style={{ background: adminTheme.colors.panelSoft }}>
+              {[
+                "Tipo",
+                "Periodo",
+                "Individual",
+                "Mediana",
+                "Grande",
+                "Jumbo",
+                "Total",
+                "Bolsas",
+                "Kg",
+                "Conf.",
+              ].map((head) => (
+                <th
+                  key={head}
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 14px",
+                    fontSize: 11,
+                    fontWeight: 800,
+                    color: adminTheme.colors.textSoft,
+                    borderBottom: `1px solid ${adminTheme.colors.border}`,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.03em",
+                  }}
+                >
+                  {head}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {safeRows.map((item, index) => (
+              <tr
+                key={`${item.periodo}-${item.__tipo}-${index}`}
+                style={{
+                  background:
+                    item.__tipo === "Proyección"
+                      ? "rgba(245, 158, 11, 0.04)"
+                      : "transparent",
+                }}
+              >
+                <td style={tableTd()}>
+                  <span
+                    style={subtleBadgeStyle(
+                      item.__tipo === "Histórico" ? "success" : "accent",
+                    )}
+                  >
+                    {item.__tipo}
+                  </span>
+                </td>
+                <td
+                  style={{
+                    ...tableTd(),
+                    fontWeight: 700,
+                    color: adminTheme.colors.text,
+                  }}
+                >
+                  {formatPeriod(item.periodo, escala)}
+                </td>
+                {["individual", "mediana", "grande", "jumbo"].map((key) => (
+                  <td
+                    key={key}
+                    style={{
+                      ...tableTd(),
+                      color: adminTheme.colors.textSoft,
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    {formatNumber(item[key], 0)}
+                  </td>
+                ))}
+                <td
+                  style={{
+                    ...tableTd(),
+                    fontWeight: 800,
+                    color: adminTheme.colors.text,
+                  }}
+                >
+                  {formatNumber(item.total_pizzas, 0)}
+                </td>
+                <td
+                  style={{
+                    ...tableTd(),
+                    color: adminTheme.colors.textSoft,
+                    fontFamily: "monospace",
+                  }}
+                >
+                  {formatNumber(item.bolsas_queso, 3)}
+                </td>
+                <td
+                  style={{
+                    ...tableTd(),
+                    color: adminTheme.colors.textSoft,
+                    fontFamily: "monospace",
+                  }}
+                >
+                  {formatNumber(item.kilogramos_queso, 2)}
+                </td>
+                <td style={tableTd()}>{renderConfidence(item.confianza)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="pred-mobile-periods">
+        {safeRows.map((item, index) => (
+          <article
+            key={`${item.periodo}-${item.__tipo}-${index}-mobile`}
+            className={`pred-mobile-period-card ${item.__tipo === "Proyección" ? "proyeccion" : ""}`}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 10,
+                alignItems: "flex-start",
+                flexWrap: "wrap",
+              }}
+            >
+              <div>
+                <strong style={{ color: adminTheme.colors.text }}>
+                  {formatPeriod(item.periodo, escala)}
+                </strong>
+                <div style={{ marginTop: 6 }}>
+                  <span
+                    style={subtleBadgeStyle(
+                      item.__tipo === "Histórico" ? "success" : "accent",
+                    )}
+                  >
+                    {item.__tipo}
+                  </span>
+                </div>
+              </div>
+              {renderConfidence(item.confianza)}
+            </div>
+
+            <div className="pred-mobile-grid">
+              <MiniValue
+                label="Individual"
+                value={formatNumber(item.individual, 0)}
+              />
+              <MiniValue
+                label="Mediana"
+                value={formatNumber(item.mediana, 0)}
+              />
+              <MiniValue label="Grande" value={formatNumber(item.grande, 0)} />
+              <MiniValue label="Jumbo" value={formatNumber(item.jumbo, 0)} />
+              <MiniValue
+                label="Total"
+                value={formatNumber(item.total_pizzas, 0)}
+                strong
+              />
+              <MiniValue
+                label="Bolsas"
+                value={formatNumber(item.bolsas_queso, 3)}
+              />
+              <MiniValue
+                label="Kg"
+                value={formatNumber(item.kilogramos_queso, 2)}
+              />
+            </div>
+          </article>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function tableTd() {
+  return {
+    padding: "12px 14px",
+    borderBottom: `1px solid ${adminTheme.colors.border}`,
+  };
+}
+
+function renderConfidence(confianza) {
+  if (!confianza) return "—";
+
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        padding: "4px 8px",
+        borderRadius: 20,
+        background:
+          confianza === "alta"
+            ? "#dcfce7"
+            : confianza === "media"
+              ? "#fef3c7"
+              : "#dbeafe",
+        color:
+          confianza === "alta"
+            ? "#166534"
+            : confianza === "media"
+              ? "#92400e"
+              : "#1e40af",
+        fontWeight: 700,
+        textTransform: "capitalize",
+        display: "inline-flex",
+        width: "fit-content",
+      }}
+    >
+      {confianza}
+    </span>
+  );
+}
+
+function MiniValue({ label, value, strong = false }) {
+  return (
+    <div
+      style={{
+        padding: 10,
+        borderRadius: 12,
+        background: "#f8fafc",
+        border: `1px solid ${adminTheme.colors.border}`,
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          color: adminTheme.colors.textSoft,
+          fontWeight: 800,
+          textTransform: "uppercase",
+          letterSpacing: ".03em",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          marginTop: 4,
+          fontSize: strong ? 18 : 15,
+          color: adminTheme.colors.text,
+          fontWeight: strong ? 900 : 800,
+          fontFamily: strong ? "inherit" : "monospace",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function InfoCard({ title, items, action }) {
+  return (
+    <div
+      className="pred-info-card"
+      style={{
+        padding: 18,
+        background: adminTheme.colors.panel,
+        borderRadius: 14,
+        border: `1px solid ${adminTheme.colors.border}`,
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 13,
+          fontWeight: 800,
+          color: adminTheme.colors.text,
+          marginBottom: 12,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          minWidth: 0,
+        }}
+      >
+        {title}
+      </div>
+      <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
+        {items?.map((item, idx) => (
+          <div key={idx} style={{ minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: adminTheme.colors.textSoft,
+                fontWeight: 600,
+                marginBottom: 2,
+              }}
+            >
+              {item.label}
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: item.highlight ? 800 : 700,
+                color: item.tone
+                  ? item.tone === "accent"
+                    ? "#b45309"
+                    : item.tone === "success"
+                      ? "#15803d"
+                      : "#1e40af"
+                  : adminTheme.colors.text,
+              }}
+            >
+              {item.value}
+            </div>
+          </div>
+        ))}
+      </div>
+      {action ? (
+        <div
+          style={{
+            marginTop: 14,
+            paddingTop: 14,
+            borderTop: `1px dashed ${adminTheme.colors.border}`,
+            fontSize: 13,
+            fontWeight: 600,
+            color: adminTheme.colors.text,
+            lineHeight: 1.6,
+          }}
+        >
+          {action}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+===== C:\Proyect_PizzaMya\Pizza_Mya-Front\Pizza_Mya-Front\Pizza_Mya-Front\src\pages\admin\admin-pedidos\adminPedidos.utils.js =====
+export function toLower(v) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+export function fmtDateTime(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return `${d.toLocaleDateString("es-MX")} · ${d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+export function money(v) {
+  const n = Number(v ?? 0);
+  return `$${n.toFixed(2)}`;
+}
+
+export function normalizeEstado(raw) {
+  const s = toLower(raw);
+  if (["pendiente", "pending"].includes(s)) return "PENDIENTE";
+  if (["preparando", "preparing", "en_preparacion"].includes(s))
+    return "PREPARANDO";
+  if (["en_entrega", "en entrega", "delivery", "out_for_delivery"].includes(s))
+    return "EN_ENTREGA";
+  if (["completado", "completada", "completed", "entregado"].includes(s))
+    return "COMPLETADO";
+  if (["cancelado", "cancelada", "canceled"].includes(s)) return "CANCELADO";
+  return String(raw || "PENDIENTE").toUpperCase();
+}
+
+export function statusPillStyle(estado) {
+  if (estado === "PREPARANDO")
+    return {
+      background: "#dbeafe",
+      color: "#1d4ed8",
+      border: "1px solid #bfdbfe",
+    };
+  if (estado === "PENDIENTE")
+    return {
+      background: "#fff7ed",
+      color: "#9a3412",
+      border: "1px solid #fed7aa",
+    };
+  if (estado === "EN_ENTREGA")
+    return {
+      background: "#ecfeff",
+      color: "#0e7490",
+      border: "1px solid #a5f3fc",
+    };
+  if (estado === "COMPLETADO")
+    return {
+      background: "#ddffe8",
+      color: "#0a7a34",
+      border: "1px solid #bbf7d0",
+    };
+  if (estado === "CANCELADO")
+    return {
+      background: "#ffe5e5",
+      color: "#b00020",
+      border: "1px solid #fecaca",
+    };
+  return {
+    background: "#f1f5f9",
+    color: "#334155",
+    border: "1px solid #e2e8f0",
+  };
+}
+
+export function getElapsedInfo(created, estado, nowTick) {
+  if (!created)
+    return { label: "Sin hora", tone: "neutral", minutes: 0, isActive: false };
+  const active = !["COMPLETADO", "CANCELADO"].includes(estado);
+  const date = new Date(created);
+  if (Number.isNaN(date.getTime()))
+    return { label: "Sin hora", tone: "neutral", minutes: 0, isActive: active };
+  const minutes = Math.max(0, Math.floor((nowTick - date.getTime()) / 60000));
+  if (!active)
+    return {
+      label: `${minutes} min final`,
+      tone: "neutral",
+      minutes,
+      isActive: false,
+    };
+  if (minutes >= 21)
+    return {
+      label: `${minutes} min · Retrasado`,
+      tone: "danger",
+      minutes,
+      isActive: true,
+    };
+  if (minutes >= 11)
+    return {
+      label: `${minutes} min · Atención`,
+      tone: "warning",
+      minutes,
+      isActive: true,
+    };
+  return {
+    label: `${minutes} min · A tiempo`,
+    tone: "success",
+    minutes,
+    isActive: true,
+  };
+}
+
+export function elapsedStyle(tone) {
+  if (tone === "danger")
+    return {
+      background: "#ffe5e5",
+      color: "#b00020",
+      border: "1px solid #fecaca",
+    };
+  if (tone === "warning")
+    return {
+      background: "#fff7ed",
+      color: "#9a3412",
+      border: "1px solid #fed7aa",
+    };
+  if (tone === "success")
+    return {
+      background: "#ddffe8",
+      color: "#0a7a34",
+      border: "1px solid #bbf7d0",
+    };
+  return {
+    background: "#f1f5f9",
+    color: "#334155",
+    border: "1px solid #e2e8f0",
+  };
+}
+
+export function downloadCsv(filename, rows) {
+  const header = Object.keys(rows[0] || {});
+  const csv = [header.join(",")]
+    .concat(
+      rows.map((row) =>
+        header
+          .map((key) => {
+            const value = row[key] ?? "";
+            const normalized = String(value).replace(/"/g, '""');
+            return `"${normalized}"`;
+          })
+          .join(","),
+      ),
+    )
+    .join("\n");
+
+  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+export function isSameDay(a, b) {
+  if (!a || !b) return false;
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+export function toDateOnlyValue(date) {
+  if (!date) return "";
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+export function parseToDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function buildCalendarDays(currentMonthDate) {
+  const year = currentMonthDate.getFullYear();
+  const month = currentMonthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startWeekDay = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < startWeekDay; i += 1) cells.push(null);
+  for (let day = 1; day <= daysInMonth; day += 1)
+    cells.push(new Date(year, month, day));
+  return cells;
+}
+
+function getPedidoDate(pedido) {
+  return parseToDate(pedido?.created_at || pedido?.created || pedido?.fecha);
+}
+
+function getClienteNombre(pedido) {
+  return (
+    pedido?.cliente?.nombre_completo ||
+    pedido?.cliente_nombre ||
+    pedido?.nombre_cliente ||
+    pedido?.cliente?.nombre ||
+    ""
+  );
+}
+
+function getClienteEmail(pedido) {
+  return pedido?.cliente?.email || pedido?.email_cliente || "";
+}
+
+function getClienteTelefono(pedido) {
+  return pedido?.cliente?.telefono || pedido?.telefono_cliente || "";
+}
+
+function getDireccion(pedido) {
+  return (
+    pedido?.direccion_entrega ||
+    pedido?.direccion ||
+    pedido?.cliente?.direccion ||
+    ""
+  );
+}
+
+function getProductosTexto(pedido) {
+  const items = Array.isArray(pedido?.items) ? pedido.items : [];
+
+  return items
+    .map(
+      (item) =>
+        item?.nombre_snapshot ||
+        item?.nombre ||
+        item?.producto_nombre ||
+        item?.producto?.nombre ||
+        "",
+    )
+    .filter(Boolean)
+    .join(" ");
+}
+
+export function matchesQuery(pedido, search) {
+  const q = toLower(search);
+  if (!q) return true;
+
+  const estado = normalizeEstado(pedido?.estatus || pedido?.estado || "");
+  const haystack = [
+    pedido?.folio,
+    pedido?.id,
+    getClienteNombre(pedido),
+    getClienteEmail(pedido),
+    getClienteTelefono(pedido),
+    getDireccion(pedido),
+    getProductosTexto(pedido),
+    estado,
+  ]
+    .map((value) => toLower(value))
+    .join(" ");
+
+  return haystack.includes(q);
+}
+
+export function sortPedidos(rows = [], orden = "recientes") {
+  const list = Array.isArray(rows) ? [...rows] : [];
+
+  return list.sort((a, b) => {
+    const dateA = getPedidoDate(a)?.getTime?.() || 0;
+    const dateB = getPedidoDate(b)?.getTime?.() || 0;
+    const totalA = Number(a?.total || 0);
+    const totalB = Number(b?.total || 0);
+
+    if (orden === "antiguos") {
+      return dateA - dateB;
+    }
+
+    if (orden === "tiempo") {
+      return dateA - dateB;
+    }
+
+    if (orden === "monto") {
+      return totalB - totalA;
+    }
+
+    return dateB - dateA;
+  });
+}
+===== C:\Proyect_PizzaMya\Pizza_Mya-Front\Pizza_Mya-Front\Pizza_Mya-Front\src\pages\admin\admin-pedidos\AdminPedidosCalendar.jsx =====
+import {
+  isSameDay,
+  startOfMonth,
+  toDateOnlyValue,
+} from "./adminPedidos.utils.js";
+import {
+  adminTheme,
+  softPanelStyle,
+} from "../../../components/admin/ui/adminTheme.js";
+
+export default function AdminPedidosCalendar({
+  calendarMonth,
+  setCalendarMonth,
+  monthTitle,
+  calendarDays,
+  today,
+  selectedDate,
+  setSelectedDate,
+  pedidosEnFechaSeleccionada,
+}) {
+  return (
+    <section
+      style={softPanelStyle({
+        padding: 18,
+        background: adminTheme.colors.panel,
+      })}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+        }}
+      >
+        <button
+          type="button"
+          style={navStyle}
+          onClick={() =>
+            setCalendarMonth(
+              new Date(
+                calendarMonth.getFullYear(),
+                calendarMonth.getMonth() - 1,
+                1,
+              ),
+            )
+          }
+        >
+          ‹
+        </button>
+        <div
+          style={{
+            fontWeight: 900,
+            textTransform: "capitalize",
+            color: adminTheme.colors.text,
+          }}
+        >
+          {monthTitle}
+        </div>
+        <button
+          type="button"
+          style={navStyle}
+          onClick={() =>
+            setCalendarMonth(
+              new Date(
+                calendarMonth.getFullYear(),
+                calendarMonth.getMonth() + 1,
+                1,
+              ),
+            )
+          }
+        >
+          ›
+        </button>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7, 1fr)",
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        {["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"].map((day) => (
+          <div
+            key={day}
+            style={{
+              textAlign: "center",
+              fontSize: 12,
+              color: adminTheme.colors.textMuted,
+              fontWeight: 700,
+            }}
+          >
+            {day}
+          </div>
+        ))}
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7, 1fr)",
+          gap: 8,
+        }}
+      >
+        {calendarDays.map((date, index) => {
+          if (!date) return <div key={`empty-${index}`} />;
+          const selected = selectedDate && isSameDay(date, selectedDate);
+          const isToday = isSameDay(date, today);
+
+          return (
+            <button
+              key={toDateOnlyValue(date)}
+              type="button"
+              style={{
+                minHeight: 42,
+                borderRadius: 12,
+                border: `1px solid ${selected ? adminTheme.colors.primary : isToday ? adminTheme.colors.accent : adminTheme.colors.border}`,
+                background: selected ? adminTheme.colors.primary : "#fff",
+                color: selected ? "#fff" : adminTheme.colors.text,
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+              onClick={() => setSelectedDate(date)}
+            >
+              {date.getDate()}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}
+      >
+        <button
+          type="button"
+          style={secondaryButtonStyle}
+          onClick={() => {
+            const now = new Date();
+            setSelectedDate(now);
+            setCalendarMonth(startOfMonth(now));
+          }}
+        >
+          Hoy
+        </button>
+        <button
+          type="button"
+          style={secondaryButtonStyle}
+          onClick={() => setSelectedDate(null)}
+        >
+          Limpiar
+        </button>
+      </div>
+
+      <div
+        style={{
+          marginTop: 14,
+          color: adminTheme.colors.textSoft,
+          fontSize: 13,
+          lineHeight: 1.55,
+        }}
+      >
+        {selectedDate ? (
+          <>
+            Mostrando pedidos del{" "}
+            <b>
+              {selectedDate.toLocaleDateString("es-MX", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+              })}
+            </b>
+            <br />
+            Pedidos en esa fecha: <b>{pedidosEnFechaSeleccionada}</b>
+          </>
+        ) : (
+          <>Mostrando todas las fechas</>
+        )}
+      </div>
+    </section>
+  );
+}
+
+const navStyle = {
+  width: 40,
+  height: 40,
+  borderRadius: 12,
+  border: `1px solid ${adminTheme.colors.border}`,
+  background: "#fff",
+  cursor: "pointer",
+  color: adminTheme.colors.text,
+  fontWeight: 900,
+};
+
+const secondaryButtonStyle = {
+  minHeight: 38,
+  padding: "0 14px",
+  borderRadius: 12,
+  border: `1px solid ${adminTheme.colors.borderStrong}`,
+  background: "#fff",
+  cursor: "pointer",
+  color: adminTheme.colors.text,
+  fontWeight: 800,
+};
+===== C:\Proyect_PizzaMya\Pizza_Mya-Front\Pizza_Mya-Front\Pizza_Mya-Front\src\pages\admin\admin-pedidos\AdminPedidosTable.jsx =====
+import AdminButton from "../../../components/admin/ui/AdminButton.jsx";
+import {
+  adminTheme,
+  subtleBadgeStyle,
+  softPanelStyle,
+} from "../../../components/admin/ui/adminTheme.js";
+import {
+  elapsedStyle,
+  fmtDateTime,
+  money,
+  statusPillStyle,
+} from "./adminPedidos.utils.js";
+import { createClientId } from "../../../utils/id.js";
+
+function getRawEstado(pedido = {}) {
+  return String(
+    pedido.estatus ||
+      pedido.estado ||
+      pedido.status ||
+      pedido.pedido_estatus ||
+      "PENDIENTE",
+  )
+    .trim()
+    .toUpperCase();
+}
+
+function getEstadoUi(pedido = {}) {
+  const raw = getRawEstado(pedido);
+
+  if (raw === "PENDIENTE") return "PENDIENTE";
+
+  if (
+    [
+      "CONFIRMADO",
+      "EN_PREPARACION",
+      "EN_PREPARACIÓN",
+      "EN_PROCESO",
+      "PREPARANDO",
+      "LISTO",
+    ].includes(raw)
+  ) {
+    return "PREPARANDO";
+  }
+
+  if (["EN_CAMINO", "EN_ENTREGA", "EN_REPARTO"].includes(raw)) {
+    return "EN_ENTREGA";
+  }
+
+  if (["ENTREGADO", "COMPLETADO"].includes(raw)) return "COMPLETADO";
+
+  if (["CANCELADO", "CANCELADA"].includes(raw)) return "CANCELADO";
+
+  return raw || "PENDIENTE";
+}
+
+function getEstadoLabel(pedido = {}) {
+  const estado = getEstadoUi(pedido);
+
+  const labels = {
+    PENDIENTE: "PENDIENTE",
+    PREPARANDO: "PREPARANDO",
+    EN_ENTREGA: "EN ENTREGA",
+    COMPLETADO: "COMPLETADO",
+    CANCELADO: "CANCELADO",
+  };
+
+  return labels[estado] || estado;
+}
+
+function getFechaPedido(pedido = {}) {
+  return (
+    pedido.created_at ||
+    pedido.createdAt ||
+    pedido.created ||
+    pedido.fecha ||
+    pedido.updated_at ||
+    null
+  );
+}
+
+function getClienteNombre(pedido = {}) {
+  return (
+    pedido.cliente?.nombre_completo ||
+    [pedido.cliente_nombres, pedido.cliente_paterno, pedido.cliente_materno]
+      .filter(Boolean)
+      .join(" ") ||
+    pedido.nombre_cliente ||
+    pedido.cliente_nombre ||
+    "Cliente no registrado"
+  );
+}
+
+function getContactoCliente(pedido = {}) {
+  return (
+    pedido.cliente?.telefono ||
+    pedido.cliente_telefono ||
+    pedido.telefono ||
+    pedido.cliente?.email ||
+    pedido.cliente_email ||
+    pedido.email ||
+    "—"
+  );
+}
+
+function getEntregaTexto(pedido = {}) {
+  const tipo =
+    pedido.tipo_pedido || pedido.tipo_entrega || pedido.metodo_entrega;
+  const direccion = pedido.direccion_entrega || pedido.direccion;
+
+  if (direccion) return direccion;
+  if (tipo) return tipo;
+
+  return "—";
+}
+
+function metodoPagoLabelFromCode(code) {
+  const finalCode = String(code || "")
+    .trim()
+    .toUpperCase();
+
+  if (finalCode === "EFECTIVO") return "Efectivo";
+  if (finalCode === "TARJETA") return "Tarjeta crédito/débito";
+  if (finalCode === "TRANSFERENCIA") return "Transferencia";
+
+  return "";
+}
+
+function getPagoTexto(pedido = {}) {
+  const transaccion = pedido.transaccion || {};
+
+  const metodo =
+    pedido.metodo_pago ||
+    pedido.metodo_pago_nombre ||
+    metodoPagoLabelFromCode(transaccion.metodo_codigo) ||
+    metodoPagoLabelFromCode(pedido.metodo_codigo) ||
+    "—";
+
+  let estatus = "PENDIENTE";
+
+  if (pedido.pagado === true) {
+    estatus = "PAGADO";
+  } else if (String(transaccion.estatus || "").toUpperCase() === "APROBADA") {
+    estatus = "APROBADA";
+  } else if (pedido.pago_estatus) {
+    estatus = pedido.pago_estatus;
+  } else if (transaccion.estatus) {
+    estatus = transaccion.estatus;
+  }
+
+  return {
+    metodo,
+    estatus,
+  };
+}
+
+function buildElapsed(pedido = {}) {
+  if (pedido?.elapsed && typeof pedido.elapsed === "object") {
+    return {
+      tone: pedido.elapsed.tone || "neutral",
+      label: pedido.elapsed.label || "Sin hora",
+    };
+  }
+
+  const dateValue = getFechaPedido(pedido);
+  const date = dateValue ? new Date(dateValue) : null;
+
+  if (!date || Number.isNaN(date.getTime())) {
+    return { tone: "neutral", label: "Sin hora" };
+  }
+
+  const diffMs = Date.now() - date.getTime();
+  const minutes = Math.max(0, Math.floor(diffMs / 60000));
+
+  if (minutes < 1) return { tone: "success", label: "Ahora" };
+
+  if (minutes < 60) {
+    return {
+      tone: minutes >= 45 ? "danger" : minutes >= 25 ? "accent" : "success",
+      label: `${minutes} min`,
+    };
+  }
+
+  const hours = Math.floor(minutes / 60);
+
+  return {
+    tone: hours >= 2 ? "danger" : "accent",
+    label: `${hours} h ${minutes % 60} min`,
+  };
+}
+
+function neutralizePill(base = {}, fallbackTone = "default") {
+  const tones = {
+    success: subtleBadgeStyle("success"),
+    info: subtleBadgeStyle("info"),
+    accent: subtleBadgeStyle("accent"),
+    danger: subtleBadgeStyle("danger"),
+    default: subtleBadgeStyle("default"),
+  };
+
+  const bg = String(base.background || "").toLowerCase();
+
+  let tone = fallbackTone;
+
+  if (bg.includes("dcfce7") || bg.includes("166534")) tone = "success";
+  else if (bg.includes("dbeafe") || bg.includes("1d4ed8")) tone = "info";
+  else if (bg.includes("fef3c7") || bg.includes("92400e")) tone = "accent";
+  else if (bg.includes("fee2e2") || bg.includes("991b1b")) tone = "danger";
+
+  return tones[tone];
+}
+
+function canSendToDelivery(pedido = {}) {
+  const raw = getRawEstado(pedido);
+
+  return [
+    "CONFIRMADO",
+    "EN_PREPARACION",
+    "EN_PREPARACIÓN",
+    "EN_PROCESO",
+    "PREPARANDO",
+    "LISTO",
+  ].includes(raw);
+}
+
+export default function AdminPedidosTable({
+  items = [],
+  page,
+  totalPages,
+  setPage,
+  start,
+  end,
+  total,
+  onOpen,
+  onEnviar,
+  updatingId,
+}) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return (
+      <section style={softPanelStyle({ padding: 20, background: "#fff" })}>
+        <h3 style={{ margin: 0, color: adminTheme.colors.text }}>
+          Sin pedidos
+        </h3>
+        <p style={{ margin: "8px 0 0", color: adminTheme.colors.textSoft }}>
+          No hay resultados para los filtros actuales.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section style={softPanelStyle({ padding: 18, background: "#fff" })}>
+      <div style={{ overflowX: "auto" }}>
+        <table
+          style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}
+        >
+          <thead>
+            <tr>
+              {[
+                "Folio",
+                "Cliente",
+                "Fecha",
+                "Entrega",
+                "Estado",
+                "Pago",
+                "Tiempo",
+                "Total",
+                "Acciones",
+              ].map((label) => (
+                <th
+                  key={label}
+                  style={{
+                    textAlign: "left",
+                    padding: "14px 10px",
+                    fontSize: 12,
+                    color: adminTheme.colors.textMuted,
+                    borderBottom: `1px solid ${adminTheme.colors.border}`,
+                    textTransform: "uppercase",
+                    letterSpacing: ".04em",
+                  }}
+                >
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {items.map((pedido) => {
+              const elapsed = buildElapsed(pedido);
+              const estado = getEstadoUi(pedido);
+              const pago = getPagoTexto(pedido);
+              const canSend = canSendToDelivery(pedido);
+
+              return (
+                <tr
+                  key={
+                    pedido?.id || pedido?.folio || createClientId("pedido-row")
+                  }
+                >
+                  <td style={tdStyle}>
+                    <strong>#{pedido?.folio || pedido?.id || "—"}</strong>
+                  </td>
+
+                  <td style={tdStyle}>
+                    <strong>{getClienteNombre(pedido)}</strong>
+                    <div style={mutedStyle}>{getContactoCliente(pedido)}</div>
+                  </td>
+
+                  <td style={tdStyle}>{fmtDateTime(getFechaPedido(pedido))}</td>
+
+                  <td style={tdStyle}>
+                    <div style={ellipsisStyle}>{getEntregaTexto(pedido)}</div>
+                  </td>
+
+                  <td style={tdStyle}>
+                    <span
+                      style={neutralizePill(
+                        statusPillStyle(estado),
+                        estado === "CANCELADO"
+                          ? "danger"
+                          : estado === "COMPLETADO"
+                            ? "success"
+                            : estado === "EN_ENTREGA"
+                              ? "info"
+                              : "accent",
+                      )}
+                    >
+                      {getEstadoLabel(pedido)}
+                    </span>
+                  </td>
+
+                  <td style={tdStyle}>
+                    <strong>{pago.metodo}</strong>
+                    <div style={mutedStyle}>{pago.estatus}</div>
+                  </td>
+
+                  <td style={tdStyle}>
+                    <span
+                      style={neutralizePill(
+                        elapsedStyle(elapsed.tone),
+                        "default",
+                      )}
+                    >
+                      {elapsed.label}
+                    </span>
+                  </td>
+
+                  <td style={tdStyle}>{money(pedido?.total)}</td>
+
+                  <td style={tdStyle}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <AdminButton
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => onOpen?.(pedido?.id)}
+                      >
+                        Ver detalle
+                      </AdminButton>
+
+                      <AdminButton
+                        size="sm"
+                        onClick={() => onEnviar?.(pedido)}
+                        disabled={!canSend}
+                        loading={updatingId === pedido?.id}
+                        loadingText="Enviando..."
+                      >
+                        En entrega
+                      </AdminButton>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          marginTop: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ color: adminTheme.colors.textSoft, fontSize: 14 }}>
+          Mostrando {total ? start : 0}–{end} de {total}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <AdminButton
+            variant="secondary"
+            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            disabled={page <= 1}
+          >
+            Anterior
+          </AdminButton>
+
+          <div style={subtleBadgeStyle("default")}>
+            Página {page} de {totalPages}
+          </div>
+
+          <AdminButton
+            variant="secondary"
+            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={page >= totalPages}
+          >
+            Siguiente
+          </AdminButton>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const tdStyle = {
+  padding: "14px 10px",
+  borderBottom: `1px solid ${adminTheme.colors.border}`,
+  verticalAlign: "top",
+  fontSize: 14,
+  color: adminTheme.colors.text,
+};
+
+const mutedStyle = {
+  color: adminTheme.colors.textSoft,
+  fontSize: 12,
+  marginTop: 4,
+};
+
+const ellipsisStyle = {
+  maxWidth: 260,
+  color: adminTheme.colors.text,
+  fontSize: 13,
+  lineHeight: 1.35,
+};
+===== C:\Proyect_PizzaMya\Pizza_Mya-Front\Pizza_Mya-Front\Pizza_Mya-Front\src\pages\admin\admin-pedidos\AdminPedidosToolbar.jsx =====
+import AdminButton from "../../../components/admin/ui/AdminButton.jsx";
+import {
+  adminTheme,
+  inputStyle,
+  softPanelStyle,
+} from "../../../components/admin/ui/adminTheme.js";
+
+export default function AdminPedidosToolbar({
+  q,
+  setQ,
+  tab,
+  setTab,
+  orden,
+  setOrden,
+  pageSize,
+  setPageSize,
+  tabs,
+  onRefresh,
+  onExport,
+  loading,
+}) {
+  return (
+    <section
+      style={softPanelStyle({
+        padding: 18,
+        background: adminTheme.colors.panel,
+      })}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <div>
+          <h3
+            style={{
+              margin: 0,
+              color: adminTheme.colors.text,
+              fontWeight: 900,
+            }}
+          >
+            Contenido de pedidos
+          </h3>
+          <div
+            style={{
+              marginTop: 6,
+              color: adminTheme.colors.textSoft,
+              fontSize: 14,
+            }}
+          >
+            Filtros, exportación y control rápido del flujo operativo
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <AdminButton
+            variant="secondary"
+            onClick={() => onRefresh(true)}
+            loading={loading}
+            loadingText="Actualizando..."
+          >
+            Actualizar
+          </AdminButton>
+          <AdminButton variant="secondary" onClick={onExport}>
+            Exportar CSV
+          </AdminButton>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "var(--adm-grid-pedidos-toolbar)",
+          gap: 12,
+          marginTop: 18,
+        }}
+      >
+        <input
+          style={inputStyle()}
+          value={q}
+          onChange={(event) => setQ(event.target.value)}
+          placeholder="Buscar por folio, cliente, email, dirección o productos..."
+        />
+
+        <select
+          style={inputStyle()}
+          value={orden}
+          onChange={(event) => setOrden(event.target.value)}
+        >
+          <option value="recientes">Más recientes</option>
+          <option value="antiguos">Más antiguos</option>
+          <option value="tiempo">Mayor tiempo</option>
+          <option value="monto">Mayor monto</option>
+        </select>
+
+        <select
+          style={inputStyle()}
+          value={pageSize}
+          onChange={(event) => setPageSize(Number(event.target.value))}
+        >
+          {[10, 20, 30, 50].map((size) => (
+            <option key={size} value={size}>
+              {size} por página
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div
+        style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}
+      >
+        {tabs.map((item) => {
+          const active = item === tab;
+          return (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setTab(item)}
+              style={{
+                minHeight: 38,
+                padding: "0 14px",
+                borderRadius: 999,
+                border: `1px solid ${active ? adminTheme.colors.primary : adminTheme.colors.borderStrong}`,
+                background: active ? adminTheme.colors.primary : "#fff",
+                color: active ? "#fff" : adminTheme.colors.text,
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              {item === "TODOS" ? "Todos" : item.replaceAll("_", " ")}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+===== C:\Proyect_PizzaMya\Pizza_Mya-Front\Pizza_Mya-Front\Pizza_Mya-Front\src\pages\admin\admin-pedidos\useAdminPedidos.js =====
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth } from "../../../context/AuthContext.jsx";
+import { adminPedidosApi } from "../../../api/adminPedidos.api.js";
+import {
+  buildCalendarDays,
+  downloadCsv,
+  matchesQuery,
+  parseToDate,
+  sortPedidos,
+  toDateOnlyValue,
+} from "./adminPedidos.utils.js";
+
+const TABS = [
+  "TODOS",
+  "PENDIENTE",
+  "PREPARANDO",
+  "EN_ENTREGA",
+  "COMPLETADO",
+  "CANCELADO",
+];
+
+function getRawEstado(pedido = {}) {
+  return String(
+    pedido.estatus ||
+      pedido.estado ||
+      pedido.status ||
+      pedido.pedido_estatus ||
+      "PENDIENTE",
+  )
+    .trim()
+    .toUpperCase();
+}
+
+function normalizeEstadoPedido(pedido = {}) {
+  const raw = getRawEstado(pedido);
+
+  if (raw === "PENDIENTE") return "PENDIENTE";
+
+  if (
+    [
+      "CONFIRMADO",
+      "EN_PREPARACION",
+      "EN_PREPARACIÓN",
+      "EN_PROCESO",
+      "PREPARANDO",
+      "LISTO",
+    ].includes(raw)
+  ) {
+    return "PREPARANDO";
+  }
+
+  if (["EN_CAMINO", "EN_ENTREGA", "EN_REPARTO"].includes(raw)) {
+    return "EN_ENTREGA";
+  }
+
+  if (["ENTREGADO", "COMPLETADO"].includes(raw)) {
+    return "COMPLETADO";
+  }
+
+  if (["CANCELADO", "CANCELADA"].includes(raw)) {
+    return "CANCELADO";
+  }
+
+  return raw || "PENDIENTE";
+}
+
+function getFechaPedido(pedido = {}) {
+  return (
+    pedido.created_at ||
+    pedido.createdAt ||
+    pedido.created ||
+    pedido.fecha ||
+    pedido.updated_at ||
+    null
+  );
+}
+
+function normalizePedidoRow(pedido = {}) {
+  const estadoUi = normalizeEstadoPedido(pedido);
+  const fecha = getFechaPedido(pedido);
+
+  return {
+    ...pedido,
+    estado: estadoUi,
+    estatus: pedido.estatus || pedido.estado || estadoUi,
+    created: fecha,
+    created_at: fecha,
+  };
+}
+
+function buildStats(rows = []) {
+  return {
+    pendientes: rows.filter(
+      (item) => normalizeEstadoPedido(item) === "PENDIENTE",
+    ).length,
+    preparando: rows.filter(
+      (item) => normalizeEstadoPedido(item) === "PREPARANDO",
+    ).length,
+    enEntrega: rows.filter(
+      (item) => normalizeEstadoPedido(item) === "EN_ENTREGA",
+    ).length,
+    completados: rows.filter(
+      (item) => normalizeEstadoPedido(item) === "COMPLETADO",
+    ).length,
+    cancelados: rows.filter(
+      (item) => normalizeEstadoPedido(item) === "CANCELADO",
+    ).length,
+  };
+}
+
+export function useAdminPedidos() {
+  const { token } = useAuth();
+
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const [q, setQ] = useState("");
+  const [tab, setTab] = useState("TODOS");
+  const [orden, setOrden] = useState("recientes");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const [showDetalle, setShowDetalle] = useState(false);
+  const [selectedPedido, setSelectedPedido] = useState(null);
+  const [confirmPedido, setConfirmPedido] = useState(null);
+  const [updatingId, setUpdatingId] = useState("");
+
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  const today = useMemo(() => new Date(), []);
+
+  const clearSuccessLater = useCallback(() => {
+    window.clearTimeout(clearSuccessLater._timer);
+    clearSuccessLater._timer = window.setTimeout(() => {
+      setSuccess("");
+    }, 2500);
+  }, []);
+
+  const load = useCallback(async () => {
+    if (!token) {
+      setItems([]);
+      setError("No autenticado");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+      setSuccess("");
+
+      const rows = await adminPedidosApi.list({ token });
+      const safeRows = Array.isArray(rows) ? rows.map(normalizePedidoRow) : [];
+
+      setItems(safeRows);
+    } catch (err) {
+      setItems([]);
+      setError(err?.message || "No se pudieron cargar los pedidos");
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, tab, orden, pageSize, selectedDate]);
+
+  const filtered = useMemo(() => {
+    const search = String(q || "")
+      .trim()
+      .toLowerCase();
+    let rows = Array.isArray(items) ? [...items] : [];
+
+    if (tab !== "TODOS") {
+      rows = rows.filter((pedido) => normalizeEstadoPedido(pedido) === tab);
+    }
+
+    if (selectedDate) {
+      const selectedValue = toDateOnlyValue(selectedDate);
+
+      rows = rows.filter((pedido) => {
+        const date = parseToDate(getFechaPedido(pedido));
+        return date ? toDateOnlyValue(date) === selectedValue : false;
+      });
+    }
+
+    if (search) {
+      rows = rows.filter((pedido) => matchesQuery(pedido, search));
+    }
+
+    return sortPedidos(rows, orden);
+  }, [items, orden, q, selectedDate, tab]);
+
+  const stats = useMemo(() => buildStats(filtered), [filtered]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+
+  const start = filtered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const end = Math.min(safePage * pageSize, filtered.length);
+
+  const paginated = useMemo(() => {
+    const from = (safePage - 1) * pageSize;
+    return filtered.slice(from, from + pageSize);
+  }, [filtered, pageSize, safePage]);
+
+  const monthTitle = useMemo(
+    () =>
+      calendarMonth.toLocaleDateString("es-MX", {
+        month: "long",
+        year: "numeric",
+      }),
+    [calendarMonth],
+  );
+
+  const calendarDays = useMemo(
+    () => buildCalendarDays(calendarMonth),
+    [calendarMonth],
+  );
+
+  const pedidosEnFechaSeleccionada = useMemo(() => {
+    if (!selectedDate) return items.length;
+
+    const selectedValue = toDateOnlyValue(selectedDate);
+
+    return items.filter((pedido) => {
+      const date = parseToDate(getFechaPedido(pedido));
+      return date ? toDateOnlyValue(date) === selectedValue : false;
+    }).length;
+  }, [items, selectedDate]);
+
+  const openDetalle = useCallback(
+    async (pedido) => {
+      const id = typeof pedido === "string" ? pedido : pedido?.id;
+
+      if (!id) return;
+
+      try {
+        setError("");
+
+        const detail = await adminPedidosApi.getById({ token, id });
+
+        setSelectedPedido(normalizePedidoRow(detail || pedido));
+      } catch {
+        setSelectedPedido(
+          typeof pedido === "object" ? normalizePedidoRow(pedido) : null,
+        );
+      } finally {
+        setShowDetalle(true);
+      }
+    },
+    [token],
+  );
+
+  const closeDetalle = useCallback(() => {
+    setShowDetalle(false);
+    setSelectedPedido(null);
+  }, []);
+
+  const confirmEnviar = useCallback((pedido) => {
+    setConfirmPedido(pedido);
+  }, []);
+
+  const cancelConfirm = useCallback(() => {
+    setConfirmPedido(null);
+  }, []);
+
+  const marcarEnEntrega = useCallback(async () => {
+    if (!confirmPedido?.id) return;
+
+    try {
+      setUpdatingId(String(confirmPedido.id));
+      setError("");
+      setSuccess("");
+
+      await adminPedidosApi.setEstado({
+        token,
+        id: confirmPedido.id,
+        estado: "EN_CAMINO",
+      });
+
+      setItems((prev) =>
+        prev.map((pedido) =>
+          String(pedido.id) === String(confirmPedido.id)
+            ? {
+                ...pedido,
+                estatus: "EN_CAMINO",
+                estado: "EN_ENTREGA",
+              }
+            : pedido,
+        ),
+      );
+
+      if (
+        selectedPedido &&
+        String(selectedPedido.id) === String(confirmPedido.id)
+      ) {
+        setSelectedPedido((prev) =>
+          prev
+            ? {
+                ...prev,
+                estatus: "EN_CAMINO",
+                estado: "EN_ENTREGA",
+              }
+            : prev,
+        );
+      }
+
+      setSuccess(
+        `Pedido ${confirmPedido.folio || confirmPedido.id} enviado a entrega`,
+      );
+
+      clearSuccessLater();
+      setConfirmPedido(null);
+    } catch (err) {
+      setError(err?.message || "No se pudo actualizar el pedido");
+    } finally {
+      setUpdatingId("");
+    }
+  }, [clearSuccessLater, confirmPedido, selectedPedido, token]);
+
+  const exportPedidos = useCallback(() => {
+    const rows = filtered.map((pedido) => ({
+      folio: pedido.folio || pedido.id,
+      cliente:
+        pedido.cliente?.nombre_completo ||
+        pedido.cliente_nombre ||
+        pedido.nombre_cliente ||
+        [pedido.cliente_nombres, pedido.cliente_paterno, pedido.cliente_materno]
+          .filter(Boolean)
+          .join(" ") ||
+        "",
+      email: pedido.cliente?.email || pedido.cliente_email || "",
+      telefono: pedido.cliente?.telefono || pedido.cliente_telefono || "",
+      fecha: getFechaPedido(pedido) || "",
+      estatus: pedido.estatus || pedido.estado || "",
+      tipo_pedido: pedido.tipo_pedido || pedido.tipo_entrega || "",
+      metodo_pago: pedido.metodo_pago || "",
+      pago_estatus: pedido.pago_estatus || pedido.transaccion?.estatus || "",
+      total: Number(pedido.total || 0).toFixed(2),
+      direccion: pedido.direccion_entrega || "",
+    }));
+
+    downloadCsv("pedidos-admin.csv", rows);
+  }, [filtered]);
+
+  return {
+    items,
+    filtered,
+    paginated,
+    loading,
+    error,
+    success,
+    stats,
+    q,
+    setQ,
+    tab,
+    setTab,
+    orden,
+    setOrden,
+    page,
+    setPage,
+    pageSize,
+    setPageSize,
+    tabs: TABS,
+    load,
+    exportPedidos,
+    start,
+    end,
+    totalPages,
+    showDetalle,
+    selectedPedido,
+    openDetalle,
+    closeDetalle,
+    confirmPedido,
+    confirmEnviar,
+    cancelConfirm,
+    marcarEnEntrega,
+    updatingId,
+    today,
+    calendarMonth,
+    setCalendarMonth,
+    monthTitle,
+    calendarDays,
+    selectedDate,
+    setSelectedDate,
+    pedidosEnFechaSeleccionada,
+  };
+}

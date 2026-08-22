@@ -1,0 +1,141 @@
+import AdminButton from "../../../components/admin/ui/AdminButton.jsx";
+import {
+  adminTheme,
+  inputStyle,
+  softPanelStyle,
+} from "../../../components/admin/ui/adminTheme.js";
+
+export default function AdminPedidosToolbar({
+  q,
+  setQ,
+  tab,
+  setTab,
+  orden,
+  setOrden,
+  pageSize,
+  setPageSize,
+  tabs,
+  onRefresh,
+  onExport,
+  loading,
+}) {
+  return (
+    <section
+      style={softPanelStyle({
+        padding: 18,
+        background: adminTheme.colors.panel,
+      })}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <div>
+          <h3
+            style={{
+              margin: 0,
+              color: adminTheme.colors.text,
+              fontWeight: 900,
+            }}
+          >
+            Contenido de pedidos
+          </h3>
+          <div
+            style={{
+              marginTop: 6,
+              color: adminTheme.colors.textSoft,
+              fontSize: 14,
+            }}
+          >
+            Filtros, exportación y control rápido del flujo operativo
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <AdminButton
+            variant="secondary"
+            onClick={() => onRefresh(true)}
+            loading={loading}
+            loadingText="Actualizando..."
+          >
+            Actualizar
+          </AdminButton>
+          <AdminButton variant="secondary" onClick={onExport}>
+            Exportar CSV
+          </AdminButton>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "var(--adm-grid-pedidos-toolbar)",
+          gap: 12,
+          marginTop: 18,
+        }}
+      >
+        <input
+          style={inputStyle()}
+          value={q}
+          onChange={(event) => setQ(event.target.value)}
+          placeholder="Buscar por folio, cliente, email, dirección o productos..."
+        />
+
+        <select
+          style={inputStyle()}
+          value={orden}
+          onChange={(event) => setOrden(event.target.value)}
+        >
+          <option value="recientes">Más recientes</option>
+          <option value="antiguos">Más antiguos</option>
+          <option value="tiempo">Mayor tiempo</option>
+          <option value="monto">Mayor monto</option>
+        </select>
+
+        <select
+          style={inputStyle()}
+          value={pageSize}
+          onChange={(event) => setPageSize(Number(event.target.value))}
+        >
+          {[10, 20, 30, 50].map((size) => (
+            <option key={size} value={size}>
+              {size} por página
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div
+        style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}
+      >
+        {tabs.map((item) => {
+          const active = item === tab;
+          return (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setTab(item)}
+              style={{
+                minHeight: 38,
+                padding: "0 14px",
+                borderRadius: 999,
+                border: `1px solid ${active ? adminTheme.colors.primary : adminTheme.colors.borderStrong}`,
+                background: active ? adminTheme.colors.primary : "#fff",
+                color: active ? "#fff" : adminTheme.colors.text,
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              {item === "TODOS" ? "Todos" : item.replaceAll("_", " ")}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
