@@ -1,0 +1,20 @@
+# Robots.txt para Pizza Mya
+User-agent: *
+Allow: /
+
+# Permitir rastreo de páginas públicas
+Allow: /catalogo
+Allow: /combos
+Allow: /galeria
+Allow: /nosotros
+
+# Bloquear áreas privadas
+Disallow: /admin
+Disallow: /cajero
+Disallow: /perfil
+Disallow: /carrito
+Disallow: /mi-pedido
+Disallow: /entrega
+
+# Sitemap
+Sitemap: https://pizzamya.com/sitemap.xml
