@@ -26,7 +26,11 @@ import ProductSlider from "../../components/ui/ProductSlider.jsx";
 import HeroCarousel from "../../components/ui/HeroCarousel.jsx";
 import ProductCard from "../../components/ui/ProductCard.jsx";
 import CategoryCard from "../../components/ui/CategoryCard.jsx";
-import { carouselSlides, featuredProducts, categories } from "../../data/homeData.js";
+import {
+  carouselSlides,
+  featuredProducts,
+  categories,
+} from "../../data/homeData.js";
 
 const FALLBACK_PROMOS = [
   {
@@ -779,7 +783,7 @@ export default function HomePage() {
       <main className="homec">
         {/* Hero Carousel Principal */}
         <HeroCarousel slides={carouselSlides} />
-        
+
         <section className="homec-hero">
           <div className="homec-shell homec-heroGrid">
             <div
@@ -944,13 +948,16 @@ export default function HomePage() {
                 product={{
                   ...product,
                   name: getProductName(product),
-                  description: normalizeText(product?.descripcion, "Deliciosa pizza preparada para compartir"),
+                  description: normalizeText(
+                    product?.descripcion,
+                    "Deliciosa pizza preparada para compartir",
+                  ),
                   price: getProductPrice(product),
                   image: getProductImage(product),
-                  badge: isPizza(product) ? 'Especialidad' : null,
-                  badgeType: isPizza(product) ? 'bestseller' : null
+                  badge: isPizza(product) ? "Especialidad" : null,
+                  badgeType: isPizza(product) ? "bestseller" : null,
                 }}
-                onAddToCart={(prod) => 
+                onAddToCart={(prod) =>
                   nav(
                     isPizza(prod)
                       ? `/personalizar/${prod?.id}`
