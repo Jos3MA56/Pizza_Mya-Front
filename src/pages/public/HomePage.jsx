@@ -465,58 +465,6 @@ function PromoCarousel({
   );
 }
 
-function ProductCard({ product, onOpen, onOrder }) {
-  const [imageError, setImageError] = useState(false);
-  const name = getProductName(product);
-  const price = Number(product?.precio_desde || getProductPrice(product));
-  const image = product?.imagen_url || getProductImage(product);
-  const rating = getProductRating(product);
-
-  return (
-    <article className="homec-productCard" data-homec-reveal>
-      <button className="homec-productImage" type="button" onClick={onOpen}>
-        {image && !imageError ? (
-          <img
-            src={image}
-            alt={name}
-            onError={() => setImageError(true)}
-            loading="lazy"
-          />
-        ) : (
-          <ImageFallback icon="🍕" label={name} />
-        )}
-      </button>
-      <div className="homec-productBody">
-        <div className="homec-productMeta">
-          <span>{getProductCategoryName(product) || "Pizza Mya"}</span>
-          {rating ? (
-            <span className="homec-ratingMini">
-              <Star size={13} fill="currentColor" />
-              {rating.avg.toFixed(1)} · {rating.count}
-            </span>
-          ) : null}
-        </div>
-        <h3>{name}</h3>
-        <p>
-          {normalizeText(
-            product?.descripcion,
-            "Una opción preparada para compartir.",
-          )}
-        </p>
-        <div className="homec-productFooter">
-          <div>
-            <small>Desde</small>
-            <strong>{money(price)}</strong>
-          </div>
-          <button type="button" onClick={onOrder}>
-            Ver
-          </button>
-        </div>
-      </div>
-    </article>
-  );
-}
-
 function ComboCard({ combo, onOpen }) {
   const [imageError, setImageError] = useState(false);
   const name = normalizeText(combo?.nombre, "Combo especial");
