@@ -966,16 +966,19 @@ export default function HomePage() {
         </section>
 
         {/* Promotions - Carrusel Principal */}
-        <section className="homec-shell homec-section" style={{ padding: 0, background: 'transparent' }}>
-          <Carousel 
-            slides={promos.map(p => ({
+        <section
+          className="homec-shell homec-section"
+          style={{ padding: 0, background: "transparent" }}
+        >
+          <Carousel
+            slides={promos.map((p) => ({
               id: p.id || p.titulo,
               titulo: p.titulo || "Promoción especial",
               descripcion: p.descripcion || "",
               etiqueta: p.etiqueta || "Oferta",
               cta: p.cta || "Ordenar ahora",
               imagen_url: p.imagen_url || "",
-              onPrimaryClick: goOrder
+              onPrimaryClick: goOrder,
             }))}
             autoplayDelay={6000}
           />
