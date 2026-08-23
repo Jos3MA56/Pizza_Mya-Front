@@ -26,7 +26,11 @@ import ProductSlider from "../../components/ui/ProductSlider.jsx";
 import HeroCarousel from "../../components/ui/HeroCarousel.jsx";
 import ProductCard from "../../components/ui/ProductCard.jsx";
 import CategoryCard from "../../components/ui/CategoryCard.jsx";
-import { carouselSlides, featuredProducts, categories } from "../../data/homeData.js";
+import {
+  carouselSlides,
+  featuredProducts,
+  categories,
+} from "../../data/homeData.js";
 
 const FALLBACK_PROMOS = [
   {
@@ -727,7 +731,7 @@ export default function HomePage() {
       <main className="homec">
         {/* Hero Carousel Principal */}
         <HeroCarousel slides={carouselSlides} />
-        
+
         <section className="homec-hero">
           <div className="homec-shell homec-heroGrid">
             <div
@@ -913,7 +917,7 @@ export default function HomePage() {
             <div className="text-center py-12 bg-white rounded-lg shadow-sm mt-8">
               <p className="text-gray-500">Cargando productos destacados...</p>
             </div>
-          )}
+          )
         </section>
 
         {/* Categories Section - Explora Nuestro Menú */}
@@ -966,16 +970,19 @@ export default function HomePage() {
         </section>
 
         {/* Promotions - Carrusel Principal */}
-        <section className="homec-shell homec-section" style={{ padding: 0, background: 'transparent' }}>
-          <Carousel 
-            slides={promos.map(p => ({
+        <section
+          className="homec-shell homec-section"
+          style={{ padding: 0, background: "transparent" }}
+        >
+          <Carousel
+            slides={promos.map((p) => ({
               id: p.id || p.titulo,
               titulo: p.titulo || "Promoción especial",
               descripcion: p.descripcion || "",
               etiqueta: p.etiqueta || "Oferta",
               cta: p.cta || "Ordenar ahora",
               imagen_url: p.imagen_url || "",
-              onPrimaryClick: goOrder
+              onPrimaryClick: goOrder,
             }))}
             autoplayDelay={6000}
           />
