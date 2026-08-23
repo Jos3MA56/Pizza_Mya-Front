@@ -21,6 +21,8 @@ import { useCart } from "../../context/CarritoContext.jsx";
 import { buildApiUrl, httpJson } from "../../api/http.js";
 import { catalogApi } from "../../api/catalogo.api.js";
 import { combosApi } from "../../api/combos.api.js";
+import Carousel from "../../components/ui/Carousel.jsx";
+import ProductSlider from "../../components/ui/ProductSlider.jsx";
 
 const FALLBACK_PROMOS = [
   {
@@ -919,7 +921,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Featured products */}
+        {/* Featured products - Slider "Los más pedidos" */}
         <section className="homec-shell homec-section">
           <SectionHeader
             eyebrow="Productos"
@@ -928,28 +930,17 @@ export default function HomePage() {
             actionLabel="Ver catálogo"
             onAction={() => nav("/catalogo")}
           />
-          <div className="homec-productGrid">
-            {featuredProducts.length > 0 ? (
-              featuredProducts.map((product, index) => (
-                <ProductCard
-                  key={product?.id || product?.nombre || index}
-                  product={product}
-                  onOpen={() => nav(`/producto/${product?.id}`)}
-                  onOrder={() =>
-                    nav(
-                      isPizza(product)
-                        ? `/personalizar/${product?.id}`
-                        : `/producto/${product?.id}`,
-                    )
-                  }
-                />
-              ))
-            ) : (
-              <div className="homec-empty">
-                Muy pronto tendremos más opciones disponibles.
-              </div>
-            )}
-          </div>
+          <ProductSlider
+            products={featuredProducts}
+            onProductClick={(product) => nav(`/producto/${product?.id}`)}
+            onOrderProduct={(product) =>
+              nav(
+                isPizza(product)
+                  ? `/personalizar/${product?.id}`
+                  : `/producto/${product?.id}`,
+              )
+            }
+          />
         </section>
 
         {/* How it works — early to reduce friction */}
@@ -974,19 +965,19 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Promotions */}
-        <section className="homec-shell homec-section">
-          <SectionHeader
-            eyebrow="Promociones"
-            title="Promociones para hoy"
-            text="Elige una promoción, combo o especialidad y arma tu pedido."
-          />
-          <PromoCarousel
-            promos={promos}
-            activeIndex={activePromo}
-            setActiveIndex={setActivePromo}
-            onPrimary={goOrder}
-            onSecondary={() => nav("/catalogo")}
+        {/* Promotions - Carrusel Principal */}
+        <section className="homec-shell homec-section" style={{ padding: 0, background: 'transparent' }}>
+          <Carousel 
+            slides={promos.map(p => ({
+              id: p.id || p.titulo,
+              titulo: p.titulo || "Promoción especial",
+              descripcion: p.descripcion || "",
+              etiqueta: p.etiqueta || "Oferta",
+              cta: p.cta || "Ordenar ahora",
+              imagen_url: p.imagen_url || "",
+              onPrimaryClick: goOrder
+            }))}
+            autoplayDelay={6000}
           />
         </section>
 
