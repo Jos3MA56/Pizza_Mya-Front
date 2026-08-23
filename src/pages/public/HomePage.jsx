@@ -23,6 +23,10 @@ import { catalogApi } from "../../api/catalogo.api.js";
 import { combosApi } from "../../api/combos.api.js";
 import Carousel from "../../components/ui/Carousel.jsx";
 import ProductSlider from "../../components/ui/ProductSlider.jsx";
+import HeroCarousel from "../../components/ui/HeroCarousel.jsx";
+import ProductCard from "../../components/ui/ProductCard.jsx";
+import CategoryCard from "../../components/ui/CategoryCard.jsx";
+import { carouselSlides, featuredProducts, categories } from "../../data/homeData.js";
 
 const FALLBACK_PROMOS = [
   {
@@ -773,6 +777,9 @@ export default function HomePage() {
     <>
       <style>{HOME_CLEAN_STYLES}</style>
       <main className="homec">
+        {/* Hero Carousel Principal */}
+        <HeroCarousel slides={carouselSlides} />
+        
         <section className="homec-hero">
           <div className="homec-shell homec-heroGrid">
             <div
@@ -930,17 +937,43 @@ export default function HomePage() {
             actionLabel="Ver catálogo"
             onAction={() => nav("/catalogo")}
           />
-          <ProductSlider
-            products={featuredProducts}
-            onProductClick={(product) => nav(`/producto/${product?.id}`)}
-            onOrderProduct={(product) =>
-              nav(
-                isPizza(product)
-                  ? `/personalizar/${product?.id}`
-                  : `/producto/${product?.id}`,
-              )
-            }
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mt-8">
+            {featuredProducts.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={{
+                  ...product,
+                  name: getProductName(product),
+                  description: normalizeText(product?.descripcion, "Deliciosa pizza preparada para compartir"),
+                  price: getProductPrice(product),
+                  image: getProductImage(product),
+                  badge: isPizza(product) ? 'Especialidad' : null,
+                  badgeType: isPizza(product) ? 'bestseller' : null
+                }}
+                onAddToCart={(prod) => 
+                  nav(
+                    isPizza(prod)
+                      ? `/personalizar/${prod?.id}`
+                      : `/producto/${prod?.id}`,
+                  )
+                }
+              />
+            ))}
+          </div>
+        </section>
+
+        {/* Categories Section */}
+        <section className="homec-shell homec-section">
+          <SectionHeader
+            eyebrow="Categorías"
+            title="Explora nuestro menú"
+            text="Encuentra lo que se te antoja hoy"
           />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-8">
+            {categories.map((category) => (
+              <CategoryCard key={category.id} category={category} />
+            ))}
+          </div>
         </section>
 
         {/* How it works — early to reduce friction */}
