@@ -33,31 +33,43 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
-*.so
-.coverage.*
-.python-version
+env/
+venv/
+.venv/
+.ENV
+.env
+.env.local
+.env.*
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
-# Compressed files
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# Archives
 *.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
 *.tar.gz
 *.tar.bz2
 *.tar.xz
-*.tar.zst
+*.gz
+*.rar
+*.7z
 ```
