@@ -885,41 +885,60 @@ export default function HomePage() {
             actionLabel="Ver catálogo"
             onAction={() => nav("/catalogo")}
           />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mt-8">
-            {featuredProducts.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={{
-                  ...product,
-                  name: getProductName(product),
-                  description: normalizeText(product?.descripcion, "Deliciosa pizza preparada para compartir"),
-                  price: getProductPrice(product),
-                  image: getProductImage(product),
-                  badge: isPizza(product) ? 'Especialidad' : null,
-                  badgeType: isPizza(product) ? 'bestseller' : null
-                }}
-                onAddToCart={(prod) => 
-                  nav(
-                    isPizza(prod)
-                      ? `/personalizar/${prod?.id}`
-                      : `/producto/${prod?.id}`,
-                  )
-                }
-              />
-            ))}
-          </div>
+          {featuredProducts.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mt-8">
+              {featuredProducts.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  product={{
+                    ...product,
+                    name: getProductName(product),
+                    description: normalizeText(product?.descripcion, "Deliciosa pizza preparada para compartir"),
+                    price: getProductPrice(product),
+                    image: getProductImage(product),
+                    badge: isPizza(product) ? 'Especialidad' : null,
+                    badgeType: isPizza(product) ? 'bestseller' : null
+                  }}
+                  onAddToCart={(prod) => 
+                    nav(
+                      isPizza(prod)
+                        ? `/personalizar/${prod?.id}`
+                        : `/producto/${prod?.id}`,
+                    )
+                  }
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 bg-white rounded-lg shadow-sm mt-8">
+              <p className="text-gray-500">Cargando productos destacados...</p>
+            </div>
+          )}
         </section>
 
-        {/* Categories Section */}
-        <section className="homec-shell homec-section">
+        {/* Categories Section - Explora Nuestro Menú */}
+        <section className="homec-shell homec-section bg-white">
           <SectionHeader
             eyebrow="Categorías"
             title="Explora nuestro menú"
             text="Encuentra lo que se te antoja hoy"
           />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-8">
-            {categories.map((category) => (
-              <CategoryCard key={category.id} category={category} />
+            {CATEGORY_CARDS.map((item) => (
+              <button
+                className="homec-categoryCard"
+                type="button"
+                key={item.title}
+                data-homec-reveal="scale"
+                onClick={() => nav(item.to)}
+              >
+                <span>{item.icon}</span>
+                <div>
+                  <h3>{item.title}</h3>
+                  <p>{item.text}</p>
+                </div>
+                <ArrowRight size={16} />
+              </button>
             ))}
           </div>
         </section>
