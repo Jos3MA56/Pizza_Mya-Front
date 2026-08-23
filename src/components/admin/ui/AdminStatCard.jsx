@@ -34,7 +34,7 @@ export default function AdminStatCard({
     info: {
       bg: "linear-gradient(135deg, #eff6ff 0%, #fff 100%)",
       border: "#93c5fd",
-      iconBg: #0284c7",
+      iconBg: "#0284c7",
       text: "#1e40af"
     },
     warning: {
